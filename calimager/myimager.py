@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from matplotlib import pyplot as plt
-import rtmon.imager as img
+import calimager.imager as img
 import numpy as np
 import struct
 import sys, os
@@ -124,10 +124,14 @@ if __name__ == "__main__":
                 plt.annotate(a, xy=annotations[a], xytext=(annotations[a][0]+0.1, annotations[a][1]+0.1), color='white', arrowprops=dict(facecolor='white', width=1, headwidth=4, shrink=0.15, edgecolor='white'),
                     horizontalalignment='left',
                     verticalalignment='bottom')
-            plt.title('Stokes I - SB %d - %s'%(chunk.subband, time.strftime("%Y-%m-%d_%H:%M:%S %Z")))
-            plt.savefig('Stokes I - SB %d - %s.png' % (chunk.subband, time.strftime("%Y-%m-%d_%H:%M:%S %Z")))
+            plt.title('Stokes I - SB %d - %s'%(chunk.subband, time.strftime("%Y-%m-%d_%H:%M:%S")))
+            plt.savefig('StokesI-SB%d-%s.png' % (chunk.subband, time.strftime("%Y-%m-%d_%H:%M:%S")))
             print "{}/{}".format(i,len(headers))
-            #plt.show()
+
+            plt.figure()
+            plt.imshow(np.abs(imager.weights), interpolation='nearest', cmap=plt.get_cmap('jet'))
+            plt.colorbar()
+            plt.show()
 
 
 

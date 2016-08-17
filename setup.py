@@ -7,7 +7,7 @@ setup(
   version="1.0",
   packages=["calimager"],
   include_package_data = True,
-  scripts=["calimager/calimager.py"],
+  scripts=["calimager/myimager.py"],
   description="Calibrated imager",
   url="https://github.com/transientskp/aartfaac-tools",
   author="Folkert Huizinga",

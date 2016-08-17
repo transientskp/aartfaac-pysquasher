@@ -21,6 +21,7 @@ class Imager:
         self.load(antposfile)
         self.dl = (Imager.C_MS/(f_hz * size * self.mDuv)); # dimensionless, in dir. cos. units
         self.lmax = self.dl * size/ 2;
+        self.weights = np.ones((size, size), np.float32)
         # self.l = np.linspace (-self.lmax, self.lmax, size);
         # self.m = np.linspace (-self.lmax, self.lmax, size);
         # self.mask = np.ones (size, size);
@@ -28,16 +29,20 @@ class Imager:
 
     def reset(self):
         self.gridvis.fill(0)
+        self.weights.fill(1)
 
 
     def addgrid(self, cm):
-        self._grid(self.U, self.V, self.gridvis, cm)
+        self._grid(self.U, self.V, self.gridvis, cm, self.weights)
 
 
     def image(self):
         """
         Create an image from the correlation matrix
         """
+        self.weights = 1.0/self.weights
+        self.weights[self.weights==1] = 0.0
+        self.gridvis *= self.weights
         self.gridvis = np.fft.fftshift(self.gridvis)
         self.gridvis = np.flipud(np.fliplr(self.gridvis))
         self.gridvis = np.conjugate(self.gridvis)
@@ -70,7 +75,8 @@ class Imager:
             np.ndarray[np.float64_t, ndim=2] U, 
             np.ndarray[np.float64_t, ndim=2] V, 
             np.ndarray[np.complex64_t, ndim=2] G, 
-            np.ndarray[np.complex64_t, ndim=2] C):
+            np.ndarray[np.complex64_t, ndim=2] C,
+            np.ndarray[np.float32_t, ndim=2] W):
         """
         Cythonified gridding function
         """
@@ -116,3 +122,9 @@ class Imager:
                 G[n, w] += north_west_power * C[a1, a2]
                 G[s, e] += south_east_power * C[a1, a2]
                 G[n, e] += north_east_power * C[a1, a2]
+
+                W[s, w] += 1
+                W[n, w] += 1
+                W[s, e] += 1
+                W[n, e] += 1
+
