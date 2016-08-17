@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from matplotlib import pyplot as plt
-import calimager.imager as img
+import imager as img
 import numpy as np
 import struct
 import sys, os
