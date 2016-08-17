@@ -1,4 +1,3 @@
-from capture import *
 import cython
 import numpy as np
 cimport numpy as np
@@ -61,7 +60,7 @@ class Imager:
                       [ 0.0000330000,  0.6030780000, 0.7976820000]])
         L = A.dot(R)
 
-        N = Chunk.NUM_ANTS
+        N = 288
         self.U = np.zeros((N,N), dtype=np.float64)
         self.V = np.zeros((N,N), dtype=np.float64)
 
@@ -92,7 +91,7 @@ class Imager:
         cdef float north_east_power
         cdef float duv = self.mDuv
         cdef float size = self.size
-        cdef int N = Chunk.NUM_ANTS
+        cdef int N = 288
 
         for a1 in range(N):
             for a2 in range(N):
