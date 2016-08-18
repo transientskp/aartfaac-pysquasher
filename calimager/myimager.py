@@ -7,10 +7,21 @@ import struct
 import sys, os
 import ephem
 import datetime
+import argparse
 
 IMAGE_RES = 1024
 
-class Chunk:
+def get_configuration():
+    """Returns a populated configuration"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('files', metavar='FILE', type=argparse.FileType('r'), nargs='+',
+            help="Files containing calibrated visibilities")
+    parser.add_argument('--res', '-r', type=int, default=1024,
+            help="Image output resolution (default: %(default)s)")
+
+    return parser.parse_args()
+
+class Acm:
     NUM_ANTS = 288
     LEN_HDR = 512
     LEN_BDY = NUM_ANTS * NUM_ANTS * 8
@@ -23,18 +34,18 @@ class Chunk:
         self.num_dipoles = 0
         self.polarization = 0
         self.num_channels = 0
-        self.data = np.zeros((Chunk.NUM_ANTS, Chunk.NUM_ANTS), dtype=np.complex64)
+        self.data = np.zeros((Acm.NUM_ANTS, Acm.NUM_ANTS), dtype=np.complex64)
 
     def add_header(self, hdr):
         """
         Add datablock header and check for correctness
         """
-        if len(hdr) != Chunk.LEN_HDR:
-            sys.stderr.write("Invalid header size: expected %d, got %d.\n"%(Chunk.LEN_HDR, len(hdr)))
+        if len(hdr) != Acm.LEN_HDR:
+            sys.stderr.write("Invalid header size: expected %d, got %d.\n"%(Acm.LEN_HDR, len(hdr)))
             sys.exit(1)
         (magic, self.start_time, self.end_time, self.subband, self.num_dipoles, self.polarization, self.num_channels) = struct.unpack("<Qddiiii", hdr[0:40])
-        if magic != Chunk.HDR_MAGIC:
-            sys.stderr.write("Invalid magic: expected %x, got %x.\n"% (Chunk.HDR_MAGIC,magic))
+        if magic != Acm.HDR_MAGIC:
+            sys.stderr.write("Invalid magic: expected %x, got %x.\n"% (Acm.HDR_MAGIC,magic))
             sys.exit(1)
         return True
 
@@ -43,43 +54,80 @@ class Chunk:
         Add body data
         """
         self.data = np.fromstring(body, dtype=np.complex64)
-        self.data = self.data.reshape(Chunk.NUM_ANTS, Chunk.NUM_ANTS)
+        self.data = self.data.reshape(Acm.NUM_ANTS, Acm.NUM_ANTS)
 
 if __name__ == "__main__":
-    filename = '/media/fhuizing/data1/294-20160813135549.cal'
-    filename = '/media/fhuizing/data1/300-20160813135547.cal'
-    filename = '/media/fhuizing/data1/S294_C63_M9_T20131120-133700-CAL'
+    config = get_configuration()
+    acm = Acm()
+    metadata = []
+    subbands = []
 
-    obs = ephem.Observer();
-    obs.pressure = 0; # To prevent refraction corrections.
-    obs.lon, obs.lat = '6.869837540','52.915122495'; # CS002 on LOFAR
-    obs_data = {};
-    obs_data['Moon'] = ephem.Moon();
-    obs_data['Jupiter'] = ephem.Jupiter();
-    obs_data['Sun'] = ephem.Sun();
-    obs_data['Cas.A'] = ephem.readdb('Cas-A,f|J, 23:23:26.0, 58:48:00,99.00,2000');
-    obs_data['Cyg.A'] = ephem.readdb('Cyg-A,f|J, 19:59:28.35, 40:44:02,99.00,2000');
-    obs_data['Tau.A'] = ephem.readdb('Tau-A,f|J, 05:34:31.94, 22:00:52.24,99.00,2000');
-    obs_data['Vir.A'] = ephem.readdb('Vir-A,f|J, 12:30:49.42338, 12:23:28.0439,99.00,2000');
-    obs_data['NCP'] = ephem.readdb('NCP,f|J, 0, 90:00:00,99.00,2000');
-    obs_data['Gal. Center'] = ephem.readdb('Galactic Center,f|J, 17:45:40.0, -29:00:28.1,99.00, 2000'); 
-    
-    chunk = Chunk()
+    for f in config.files:
+        acm.add_header(f.read(Acm.LEN_HDR))
+        subbands.append(acm.subband)
+        f.seek(0)
+
+    for f in config.files:
+        size = os.path.getsize(f.name)
+        N = size/(Acm.LEN_BDY+Acm.LEN_HDR)
+
+        for i in range(N):
+            acm.add_header(f.read(Acm.LEN_HDR))
+            metadata.append((acm.start_time, acm.subband, acm.polarization, f, f.tell()))
+            f.seek(f.tell()+Acm.LEN_BDY)
+
+    metadata.sort()
+    n = len(metadata)
+    m = len(subbands)*2
+    valid = []
+    times = np.zeros((m, 1), dtype=np.uint32)
+    for i in range(n):
+        if i+m >= n:
+            break
+        for j in range(m):
+            times[j] = np.uint32(metadata[i+j][0])
+        if (times[0] == times).all():
+            valid.append(i)
+            i += m
+
+    L = np.linspace (-1, 1, IMAGE_RES);
+    M = np.linspace (-1, 1, IMAGE_RES);
+    mask = np.ones ( (IMAGE_RES, IMAGE_RES) );
+    xv,yv = np.meshgrid (L,M);
+    mask [np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
+    freq_hz = np.array(subbands).mean()*(2e8/1024)
+    imager = img.Imager('/usr/local/share/aartfaac/antennasets/lba_outer.dat', freq_hz, IMAGE_RES)
+    for i in valid:
+        imager.reset()
+        time = datetime.datetime.utcfromtimestamp(metadata[i][0])
+        for j in range(m):
+            f = metadata[i+j][3]
+            f.seek(metadata[i+j][4])
+            acm.add_body(f.read(Acm.LEN_BDY))
+            imager.addgrid(acm.data)
+        img = imager.image()
+        plt.clf()
+        plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
+        plt.title('Stokes I - %i - %s'%(int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
+        plt.show()
+
+
+"""
     with open(filename) as f:
         headers = []
         size = os.path.getsize(filename)
-        N = size/(Chunk.LEN_BDY+Chunk.LEN_HDR)
+        N = size/(Acm.LEN_BDY+Acm.LEN_HDR)
 
         for i in range(N):
-            chunk.add_header(f.read(Chunk.LEN_HDR))
+            chunk.add_header(f.read(Acm.LEN_HDR))
             headers.append((chunk.start_time, chunk.polarization, f.tell()))
-            f.seek(f.tell()+Chunk.LEN_BDY)
+            f.seek(f.tell()+Acm.LEN_BDY)
 
         headers.sort()
         print "Parsed {} headers, filesize {}".format(len(headers), size)
 
-        xx = Chunk()
-        yy = Chunk()
+        xx = Acm()
+        yy = Acm()
         assert(xx.subband == yy.subband)
 
         imager = img.Imager('/usr/local/share/aartfaac/antennasets/lba_outer.dat', chunk.subband*(2e8/1024), IMAGE_RES)
@@ -94,10 +142,10 @@ if __name__ == "__main__":
         for i in range(0, len(headers), 2):
             hdr = headers[i]
             f.seek(hdr[2])
-            xx.add_body(f.read(Chunk.LEN_BDY))
+            xx.add_body(f.read(Acm.LEN_BDY))
             hdr = headers[i+1]
             f.seek(hdr[2])
-            yy.add_body(f.read(Chunk.LEN_BDY))
+            yy.add_body(f.read(Acm.LEN_BDY))
             time = datetime.datetime.utcfromtimestamp(hdr[0])
 
             # annotations
@@ -132,6 +180,7 @@ if __name__ == "__main__":
             plt.imshow(np.abs(imager.weights), interpolation='nearest', cmap=plt.get_cmap('jet'))
             plt.colorbar()
             plt.show()
+"""
 
 
 

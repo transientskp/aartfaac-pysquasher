@@ -41,7 +41,7 @@ class Imager:
         """
         self.weights = 1.0/self.weights
         self.weights[self.weights==1] = 0.0
-        self.gridvis *= self.weights
+        #self.gridvis *= self.weights
         self.gridvis = np.fft.fftshift(self.gridvis)
         self.gridvis = np.flipud(np.fliplr(self.gridvis))
         self.gridvis = np.conjugate(self.gridvis)
