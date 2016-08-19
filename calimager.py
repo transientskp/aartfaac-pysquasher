@@ -56,7 +56,7 @@ class Acm:
         self.data = self.data.reshape(Acm.NUM_ANTS, Acm.NUM_ANTS)
 
 
-def load(filename, n):
+def load(filename, subbands):
     """
     Load antenna positions and compute U,V coordinates
     """
@@ -70,11 +70,14 @@ def load(filename, n):
 
     for a1 in range(0, Acm.NUM_ANTS):
         for a2 in range(0, Acm.NUM_ANTS):
-            u.append((L[a1,0] - L[a2,0]))
-            v.append((L[a1,1] - L[a2,1]))
+            u.append(L[a1,0] - L[a2,0])
+            v.append(L[a1,1] - L[a2,1])
 
-    return [np.ravel([np.array(u) for i in range(n)]), \
-            np.ravel([np.array(v) for i in range(n)])]
+    c = 299792458.0
+    uv = [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in subbands]), \
+          np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in subbands])]
+
+    return uv
 
 
 
@@ -118,10 +121,9 @@ if __name__ == "__main__":
     xv,yv = np.meshgrid (L,M);
     mask [np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
     freq_hz = np.array(subbands).mean()*(2e8/1024)
-    duv = 299792458.0 / freq_hz / 2.0
-    dx = 1.0 / (duv * config.res)
+    dx = 1.0 / config.res
 
-    in_ax = load('/usr/local/share/aartfaac/antennasets/lba_outer.dat', m)
+    in_ax = load('/usr/local/share/aartfaac/antennasets/lba_outer.dat', subbands)
     out_ax = [(dx, config.res), (dx, config.res)]
 
     for i in valid:
@@ -138,5 +140,5 @@ if __name__ == "__main__":
         plt.clf()
         plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
         plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
-        plt.savefig('StokesI-%i-%s.png' % (int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
+        plt.savefig('StokesI-%i-%i-%s.png' % (np.array(subbands).mean(), len(subbands), time.strftime("%Y-%m-%d %H:%M:%S")))
         break
