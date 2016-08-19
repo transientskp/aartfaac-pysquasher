@@ -2,6 +2,7 @@
 
 from matplotlib import pyplot as plt
 import numpy as np
+import multiprocessing
 import struct
 import sys, os
 import datetime
@@ -136,5 +137,6 @@ if __name__ == "__main__":
 
         plt.clf()
         plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-        plt.title('Stokes I - %i - %s' % (int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
+        plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
         plt.savefig('StokesI-%i-%s.png' % (int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
+        break
