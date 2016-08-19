@@ -1,15 +1,12 @@
 #!/usr/bin/env python
 
 from matplotlib import pyplot as plt
-import calimager.imager as img
 import numpy as np
 import struct
 import sys, os
-import ephem
 import datetime
 import argparse
-
-IMAGE_RES = 1024
+import gfft
 
 def get_configuration():
     """Returns a populated configuration"""
@@ -20,6 +17,7 @@ def get_configuration():
             help="Image output resolution (default: %(default)s)")
 
     return parser.parse_args()
+
 
 class Acm:
     NUM_ANTS = 288
@@ -56,6 +54,29 @@ class Acm:
         self.data = np.fromstring(body, dtype=np.complex64)
         self.data = self.data.reshape(Acm.NUM_ANTS, Acm.NUM_ANTS)
 
+
+def load(filename, n):
+    """
+    Load antenna positions and compute U,V coordinates
+    """
+    A = np.loadtxt(filename)
+    R = np.array([[-0.1195950000, -0.7919540000, 0.5987530000],
+                  [ 0.9928230000, -0.0954190000, 0.0720990000],
+                  [ 0.0000330000,  0.6030780000, 0.7976820000]])
+    L = A.dot(R)
+
+    u, v = [], []
+
+    for a1 in range(0, Acm.NUM_ANTS):
+        for a2 in range(0, Acm.NUM_ANTS):
+            u.append((L[a1,0] - L[a2,0]))
+            v.append((L[a1,1] - L[a2,1]))
+
+    return [np.ravel([np.array(u) for i in range(n)]), \
+            np.ravel([np.array(v) for i in range(n)])]
+
+
+
 if __name__ == "__main__":
     config = get_configuration()
     acm = Acm()
@@ -90,101 +111,30 @@ if __name__ == "__main__":
             valid.append(i)
             i += m
 
-    L = np.linspace (-1, 1, IMAGE_RES);
-    M = np.linspace (-1, 1, IMAGE_RES);
-    mask = np.ones ( (IMAGE_RES, IMAGE_RES) );
+    L = np.linspace (-1, 1, config.res);
+    M = np.linspace (-1, 1, config.res);
+    mask = np.ones ( (config.res, config.res) );
     xv,yv = np.meshgrid (L,M);
     mask [np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
     freq_hz = np.array(subbands).mean()*(2e8/1024)
-    imager = img.Imager('/usr/local/share/aartfaac/antennasets/lba_outer.dat', freq_hz, IMAGE_RES)
+    duv = 299792458.0 / freq_hz / 2.0
+    dx = 1.0 / (duv * config.res)
+
+    in_ax = load('/usr/local/share/aartfaac/antennasets/lba_outer.dat', m)
+    out_ax = [(dx, config.res), (dx, config.res)]
+
     for i in valid:
-        imager.reset()
         time = datetime.datetime.utcfromtimestamp(metadata[i][0])
+        data = []
         for j in range(m):
             f = metadata[i+j][3]
             f.seek(metadata[i+j][4])
             acm.add_body(f.read(Acm.LEN_BDY))
-            imager.addgrid(acm.data)
-        img = imager.image()
+            data.append(acm.data)
+
+        img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax))))
+
         plt.clf()
         plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-        plt.title('Stokes I - %i - %s'%(int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
-        plt.show()
-
-
-"""
-    with open(filename) as f:
-        headers = []
-        size = os.path.getsize(filename)
-        N = size/(Acm.LEN_BDY+Acm.LEN_HDR)
-
-        for i in range(N):
-            chunk.add_header(f.read(Acm.LEN_HDR))
-            headers.append((chunk.start_time, chunk.polarization, f.tell()))
-            f.seek(f.tell()+Acm.LEN_BDY)
-
-        headers.sort()
-        print "Parsed {} headers, filesize {}".format(len(headers), size)
-
-        xx = Acm()
-        yy = Acm()
-        assert(xx.subband == yy.subband)
-
-        imager = img.Imager('/usr/local/share/aartfaac/antennasets/lba_outer.dat', chunk.subband*(2e8/1024), IMAGE_RES)
-
-        l = np.linspace (-1, 1, IMAGE_RES);
-        m = np.linspace (-1, 1, IMAGE_RES);
-        mask = np.ones ( (IMAGE_RES, IMAGE_RES) );
-        xv,yv = np.meshgrid (l,m);
-        mask [np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
-
-        
-        for i in range(0, len(headers), 2):
-            hdr = headers[i]
-            f.seek(hdr[2])
-            xx.add_body(f.read(Acm.LEN_BDY))
-            hdr = headers[i+1]
-            f.seek(hdr[2])
-            yy.add_body(f.read(Acm.LEN_BDY))
-            time = datetime.datetime.utcfromtimestamp(hdr[0])
-
-            # annotations
-            obs.date = datetime.datetime.utcfromtimestamp(hdr[0])
-
-            # Compute local coordinates of all objects to be plotted.
-            annotations = {}
-            for k in obs_data.keys():
-                obs_data[k].compute (obs);
-                if obs_data[k].alt > 0:
-                    u = -(np.cos(obs_data[k].alt) * np.sin(obs_data[k].az));
-                    v =  (np.cos(obs_data[k].alt) * np.cos(obs_data[k].az)); 
-                    annotations[k] = (u,v)
-
-            imager.reset()
-            imager.addgrid(xx.data)
-            imager.addgrid(yy.data)
-            img = imager.image()
-            plt.clf()
-            plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[l[0], l[-1], m[0], m[-1]])
-
-            # add annotations
-            for a in annotations.keys():
-                plt.annotate(a, xy=annotations[a], xytext=(annotations[a][0]+0.1, annotations[a][1]+0.1), color='white', arrowprops=dict(facecolor='white', width=1, headwidth=4, shrink=0.15, edgecolor='white'),
-                    horizontalalignment='left',
-                    verticalalignment='bottom')
-            plt.title('Stokes I - SB %d - %s'%(chunk.subband, time.strftime("%Y-%m-%d_%H:%M:%S")))
-            plt.savefig('StokesI-SB%d-%s.png' % (chunk.subband, time.strftime("%Y-%m-%d_%H:%M:%S")))
-            print "{}/{}".format(i,len(headers))
-
-            plt.figure()
-            plt.imshow(np.abs(imager.weights), interpolation='nearest', cmap=plt.get_cmap('jet'))
-            plt.colorbar()
-            plt.show()
-"""
-
-
-
-            
-
-
-        
+        plt.title('Stokes I - %i - %s' % (int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
+        plt.savefig('StokesI-%i-%s.png' % (int(freq_hz), time.strftime("%Y-%m-%d_%H:%M:%S")))
