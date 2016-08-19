@@ -141,4 +141,3 @@ if __name__ == "__main__":
         plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
         plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
         plt.savefig('StokesI-%i-%i-%s.png' % (np.array(subbands).mean(), len(subbands), time.strftime("%Y-%m-%d %H:%M:%S")))
-        break
