@@ -74,8 +74,14 @@ def load(filename, subbands):
             v.append(L[a1,1] - L[a2,1])
 
     c = 299792458.0
-    uv = [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in subbands]), \
-          np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in subbands])]
+    S = []
+    # add subband twice for each pol
+    for s in subbands:
+        S.append(s)
+        S.append(s)
+
+    uv = [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in S]), \
+          np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in S])]
 
     return uv
 
