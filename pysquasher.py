@@ -4,10 +4,14 @@ from matplotlib import pyplot as plt
 import numpy as np
 import multiprocessing
 import struct
-import sys, os
+import sys
+import os
 import datetime
 import argparse
 import gfft
+import logging, logging.handlers
+
+LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
 def get_configuration():
     """Returns a populated configuration"""
@@ -88,6 +92,14 @@ def load(filename, subbands):
 
 
 if __name__ == "__main__":
+    logfile = '/tmp/pysquasher.log'
+    formatter = logging.Formatter(LOG_FORMAT)
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
     config = get_configuration()
     acm = Acm()
     metadata = []
@@ -97,6 +109,11 @@ if __name__ == "__main__":
         acm.add_header(f.read(Acm.LEN_HDR))
         subbands.append(acm.subband)
         f.seek(0)
+
+    logger.info('Imaging %i subbands', len(subbands))
+    logger.info('  %0.2f MHz central frequency', np.array(subbands).mean()*2e2/1024)
+    logger.info('  %0.2f MHz bandwidth', len(subbands)*(2e2/1024))
+    logger.info('  %ix%i pixel resolution', config.res, config.res)
 
     for f in config.files:
         size = os.path.getsize(f.name)
@@ -141,7 +158,7 @@ if __name__ == "__main__":
             acm.add_body(f.read(Acm.LEN_BDY))
             data.append(acm.data)
 
-        img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax))))
+        img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False))))
 
         plt.clf()
         plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
