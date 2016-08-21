@@ -13,8 +13,15 @@ import logging, logging.handlers
 
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
+NUM_ANT = 288
+LEN_HDR = 512
+LEN_BDY = NUM_ANT**2 * 8
+HDR_MAGIC = 0x4141525446414143
+
 def get_configuration():
-    """Returns a populated configuration"""
+    """
+    Returns a populated configuration
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('files', metavar='FILE', type=argparse.FileType('r'), nargs='+',
             help="Files containing calibrated visibilities")
@@ -24,40 +31,20 @@ def get_configuration():
     return parser.parse_args()
 
 
-class Acm:
-    NUM_ANTS = 288
-    LEN_HDR = 512
-    LEN_BDY = NUM_ANTS * NUM_ANTS * 8
-    HDR_MAGIC = 0x4141525446414143
+def parse_header(hdr):
+    """
+    Parse aartfaac header for calibrated data
+    """
+    m, t0, t1, s, d, p, c = struct.unpack("<Qddiiii", hdr[0:40])
+    assert(m == HDR_MAGIC)
+    return (m, t0, t1, s, d, p, c)
 
-    def __init__(self):
-        self.start_time = 0.0
-        self.end_time = 0.0
-        self.subband = 0
-        self.num_dipoles = 0
-        self.polarization = 0
-        self.num_channels = 0
-        self.data = np.zeros((Acm.NUM_ANTS, Acm.NUM_ANTS), dtype=np.complex64)
 
-    def add_header(self, hdr):
-        """
-        Add datablock header and check for correctness
-        """
-        if len(hdr) != Acm.LEN_HDR:
-            sys.stderr.write("Invalid header size: expected %d, got %d.\n"%(Acm.LEN_HDR, len(hdr)))
-            sys.exit(1)
-        (magic, self.start_time, self.end_time, self.subband, self.num_dipoles, self.polarization, self.num_channels) = struct.unpack("<Qddiiii", hdr[0:40])
-        if magic != Acm.HDR_MAGIC:
-            sys.stderr.write("Invalid magic: expected %x, got %x.\n"% (Acm.HDR_MAGIC,magic))
-            sys.exit(1)
-        return True
-
-    def add_body(self, body):
-        """
-        Add body data
-        """
-        self.data = np.fromstring(body, dtype=np.complex64)
-        self.data = self.data.reshape(Acm.NUM_ANTS, Acm.NUM_ANTS)
+def parse_data(data):
+    """
+    Parse aartfaac ACM
+    """
+    return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
 
 
 def load(filename, subbands):
@@ -72,8 +59,8 @@ def load(filename, subbands):
 
     u, v = [], []
 
-    for a1 in range(0, Acm.NUM_ANTS):
-        for a2 in range(0, Acm.NUM_ANTS):
+    for a1 in range(0, NUM_ANT):
+        for a2 in range(0, NUM_ANT):
             u.append(L[a1,0] - L[a2,0])
             v.append(L[a1,1] - L[a2,1])
 
@@ -84,15 +71,11 @@ def load(filename, subbands):
         S.append(s)
         S.append(s)
 
-    uv = [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in S]), \
-          np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in S])]
-
-    return uv
-
+    return [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in S]), \
+           np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in S])]
 
 
 if __name__ == "__main__":
-    logfile = '/tmp/pysquasher.log'
     formatter = logging.Formatter(LOG_FORMAT)
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
@@ -101,13 +84,12 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
 
     config = get_configuration()
-    acm = Acm()
     metadata = []
     subbands = []
 
     for f in config.files:
-        acm.add_header(f.read(Acm.LEN_HDR))
-        subbands.append(acm.subband)
+        _, _, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        subbands.append(s)
         f.seek(0)
 
     logger.info('Imaging %i subbands', len(subbands))
@@ -117,12 +99,12 @@ if __name__ == "__main__":
 
     for f in config.files:
         size = os.path.getsize(f.name)
-        N = size/(Acm.LEN_BDY+Acm.LEN_HDR)
+        N = size/(LEN_BDY+LEN_HDR)
 
         for i in range(N):
-            acm.add_header(f.read(Acm.LEN_HDR))
-            metadata.append((acm.start_time, acm.subband, acm.polarization, f, f.tell()))
-            f.seek(f.tell()+Acm.LEN_BDY)
+            m, t0, t1, s, d, p, c = parse_header(f.read(LEN_HDR))
+            metadata.append((t0, s, p, f, f.tell()))
+            f.seek(f.tell()+LEN_BDY)
 
     metadata.sort()
     n = len(metadata)
@@ -155,12 +137,14 @@ if __name__ == "__main__":
         for j in range(m):
             f = metadata[i+j][3]
             f.seek(metadata[i+j][4])
-            acm.add_body(f.read(Acm.LEN_BDY))
-            data.append(acm.data)
+            data.append(parse_data(f.read(LEN_BDY)))
 
         img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False))))
 
+        filename = 'StokesI-%i-%i-%s.png' % (np.array(subbands).mean(), len(subbands), time.strftime("%Y-%m-%d %H:%M:%S"))
         plt.clf()
         plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
         plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
-        plt.savefig('StokesI-%i-%i-%s.png' % (np.array(subbands).mean(), len(subbands), time.strftime("%Y-%m-%d %H:%M:%S")))
+        plt.savefig(filename)
+        logger.info(filename)
+        
