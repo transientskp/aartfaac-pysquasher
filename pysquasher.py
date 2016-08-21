@@ -25,8 +25,10 @@ def get_configuration():
     parser = argparse.ArgumentParser()
     parser.add_argument('files', metavar='FILE', type=argparse.FileType('r'), nargs='+',
             help="Files containing calibrated visibilities")
-    parser.add_argument('--res', '-r', type=int, default=1024,
+    parser.add_argument('--res', type=int, default=1024,
             help="Image output resolution (default: %(default)s)")
+    parser.add_argument('--nthreads', type=int, default=multiprocessing.cpu_count(),
+            help="Number of threads to use for imaging (default: %(default)s)")
 
     return parser.parse_args()
 
@@ -45,6 +47,27 @@ def parse_data(data):
     Parse aartfaac ACM
     """
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
+
+
+def process(sbs):
+    """
+    Constructs a single image
+    """
+    time = datetime.datetime.utcfromtimestamp(sbs[0][0])
+    data = []
+    for sb in sbs:
+        f = open(sb[3], 'r')
+        f.seek(sb[4])
+        data.append(parse_data(f.read(LEN_BDY)))
+
+    img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False))))
+
+    filename = '%s-S%i-I%i.png' % (time.strftime("%Y%m%d%H%M%S"), np.mean(subbands), len(subbands))
+    plt.clf()
+    plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
+    plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
+    plt.savefig(filename)
+    logger.info(filename)
 
 
 def load(filename, subbands):
@@ -103,8 +126,10 @@ if __name__ == "__main__":
 
         for i in range(N):
             m, t0, t1, s, d, p, c = parse_header(f.read(LEN_HDR))
-            metadata.append((t0, s, p, f, f.tell()))
+            metadata.append((t0, s, p, f.name, f.tell()))
             f.seek(f.tell()+LEN_BDY)
+
+        f.close()
 
     metadata.sort()
     n = len(metadata)
@@ -117,7 +142,7 @@ if __name__ == "__main__":
         for j in range(m):
             times[j] = np.uint32(metadata[i+j][0])
         if (times[0] == times).all():
-            valid.append(i)
+            valid.append(metadata[i:i+m])
             i += m
 
     L = np.linspace (-1, 1, config.res);
@@ -131,20 +156,6 @@ if __name__ == "__main__":
     in_ax = load('/usr/local/share/aartfaac/antennasets/lba_outer.dat', subbands)
     out_ax = [(dx, config.res), (dx, config.res)]
 
-    for i in valid:
-        time = datetime.datetime.utcfromtimestamp(metadata[i][0])
-        data = []
-        for j in range(m):
-            f = metadata[i+j][3]
-            f.seek(metadata[i+j][4])
-            data.append(parse_data(f.read(LEN_BDY)))
-
-        img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False))))
-
-        filename = 'StokesI-%i-%i-%s.png' % (np.array(subbands).mean(), len(subbands), time.strftime("%Y-%m-%d %H:%M:%S"))
-        plt.clf()
-        plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-        plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
-        plt.savefig(filename)
-        logger.info(filename)
-        
+    subbands = np.array(subbands)
+    pool = multiprocessing.Pool(config.nthreads)
+    pool.map(process, valid)
