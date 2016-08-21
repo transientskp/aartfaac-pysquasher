@@ -9,14 +9,16 @@ import os
 import datetime
 import argparse
 import gfft
-import logging, logging.handlers
+import logging
 
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
+VERSION = '1.0'
 NUM_ANT = 288
 LEN_HDR = 512
 LEN_BDY = NUM_ANT**2 * 8
 HDR_MAGIC = 0x4141525446414143
+config = None
 
 def get_configuration():
     """
@@ -27,6 +29,12 @@ def get_configuration():
             help="Files containing calibrated visibilities")
     parser.add_argument('--res', type=int, default=1024,
             help="Image output resolution (default: %(default)s)")
+    parser.add_argument('--window', type=int, default=6,
+            help="Kaiser window size (default: %(default)s)")
+    parser.add_argument('--alpha', type=float, default=1.5,
+            help="Kaiser window alpha param (default: %(default)s)")
+    parser.add_argument('--antpos', type=str, default='/usr/local/share/aartfaac/antennasets/lba_outer.dat',
+            help="Location of the antenna positions file (default: %(default)s)")
     parser.add_argument('--nthreads', type=int, default=multiprocessing.cpu_count(),
             help="Number of threads to use for imaging (default: %(default)s)")
 
@@ -60,9 +68,9 @@ def process(sbs):
         f.seek(sb[4])
         data.append(parse_data(f.read(LEN_BDY)))
 
-    img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False))))
+    img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha))))
 
-    filename = '%s-S%i-I%i.png' % (time.strftime("%Y%m%d%H%M%S"), np.mean(subbands), len(subbands))
+    filename = '%s-S%i-I%i-W%i-A%0.1f.png' % (time.strftime("%Y%m%d%H%M%S"), np.mean(subbands), len(subbands), config.window, config.alpha)
     plt.clf()
     plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
     plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
@@ -95,7 +103,7 @@ def load(filename, subbands):
         S.append(s)
 
     return [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in S]), \
-           np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in S])]
+            np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in S])]
 
 
 if __name__ == "__main__":
@@ -115,10 +123,13 @@ if __name__ == "__main__":
         subbands.append(s)
         f.seek(0)
 
+    logger.info('pysquasher v%s (%i threads)', VERSION, config.nthreads)
     logger.info('Imaging %i subbands', len(subbands))
-    logger.info('  %0.2f MHz central frequency', np.array(subbands).mean()*2e2/1024)
-    logger.info('  %0.2f MHz bandwidth', len(subbands)*(2e2/1024))
-    logger.info('  %ix%i pixel resolution', config.res, config.res)
+    logger.info('%0.2f MHz central frequency', np.array(subbands).mean()*2e2/1024)
+    logger.info('%0.2f MHz bandwidth', len(subbands)*(2e2/1024))
+    logger.info('%ix%i pixel resolution', config.res, config.res)
+    logger.info('%i Kaiser window size', config.window)
+    logger.info('%0.1f Kaiser alpha paramter', config.alpha)
 
     for f in config.files:
         size = os.path.getsize(f.name)
@@ -153,7 +164,7 @@ if __name__ == "__main__":
     freq_hz = np.array(subbands).mean()*(2e8/1024)
     dx = 1.0 / config.res
 
-    in_ax = load('/usr/local/share/aartfaac/antennasets/lba_outer.dat', subbands)
+    in_ax = load(config.antpos, subbands)
     out_ax = [(dx, config.res), (dx, config.res)]
 
     subbands = np.array(subbands)
