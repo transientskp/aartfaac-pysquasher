@@ -166,6 +166,9 @@ if __name__ == "__main__":
         subbands.append(s)
         f.seek(0)
 
+    dx = 1.0 / config.res
+    in_ax = load(config.antpos, subbands)
+    out_ax = [(dx, config.res), (dx, config.res)]
     freq_hz = np.mean(subbands)*(2e8/1024)
     bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
 
@@ -211,10 +214,6 @@ if __name__ == "__main__":
     mask = np.ones((config.res, config.res));
     xv,yv = np.meshgrid(L,M);
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
-    dx = 1.0 / config.res
-
-    in_ax = load(config.antpos, subbands)
-    out_ax = [(dx, config.res), (dx, config.res)]
 
     logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
     pool = multiprocessing.Pool(config.nthreads)
