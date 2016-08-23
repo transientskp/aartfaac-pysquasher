@@ -11,6 +11,7 @@ import pytz
 import argparse
 import logging
 import gfft
+import errno
 
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
@@ -19,7 +20,6 @@ NUM_ANT = 288
 LEN_HDR = 512
 LEN_BDY = NUM_ANT**2 * 8
 HDR_MAGIC = 0x4141525446414143
-config = None
 
 def get_configuration():
     """
@@ -40,6 +40,8 @@ def get_configuration():
             help="Location of the antenna positions file (default: %(default)s)")
     parser.add_argument('--nthreads', type=int, default=multiprocessing.cpu_count(),
             help="Number of threads to use for imaging (default: %(default)s)")
+    parser.add_argument('--output', type=str, default=os.getcwd(),
+            help="Output directory (default: %(default)s)")
 
     return parser.parse_args()
 
@@ -94,11 +96,12 @@ def image_png(metadata):
               
     img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha))))
 
-    filename = '%s_S%i_I%ix%i_W%i_A%0.1f.png' % (time.strftime("%Y%m%d_%H%M%S"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (time.strftime("%Y%m%d%H%M%S%Z"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
     plt.clf()
     plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-    plt.title('Stokes I - %0.2f - %s' % (freq_hz/1e6, time.strftime("%Y-%m-%d %H:%M:%S")))
-    plt.savefig(filename)
+    plt.title('F %0.2fMHz - BW %0.2fMHz - T %is - %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, time.strftime("%Y-%m-%d %H:%M:%S %Z")), fontsize=9)
+    plt.colorbar()
+    plt.savefig(os.path.join(config.output, filename))
     logger.info(filename)
 
 
@@ -133,15 +136,44 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
 
     config = get_configuration()
+    try:
+        os.makedirs(config.output)
+    except OSError as exc:
+        if exc.errno == errno.EEXIST and os.path.isdir(config.output):
+            pass
+        else:
+            raise
+
     logger.info('pysquasher v%s (%i threads)', VERSION, config.nthreads)
 
     metadata = []
     subbands = []
 
     for f in config.files:
-        _, _, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        utc_first = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
+        size = os.path.getsize(f.name)
+        n = size/(LEN_BDY+LEN_HDR)
+        f.seek((n-1)*(LEN_BDY+LEN_HDR))
+        _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        utc_last = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
+        logger.info('parsing \'%s\' (%i bytes)', os.path.basename(f.name), size)
+        logger.info('  %s start time', datetime.datetime.strftime(utc_first, '%Y-%d-%m %H:%M:%S %Z'))
+        logger.info('  %s end time', datetime.datetime.strftime(utc_last, '%Y-%d-%m %H:%M:%S %Z'))
         subbands.append(s)
         f.seek(0)
+
+    freq_hz = np.mean(subbands)*(2e8/1024)
+    bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
+
+    logger.info('%i subbands', len(subbands))
+    logger.info('%0.2f MHz central frequency', freq_hz*1e-6)
+    logger.info('%0.2f MHz bandwidth', bw_hz*1e-6)
+    logger.info('%i seconds integration time', config.inttime)
+    logger.info('%ix%i pixel resolution', config.res, config.res)
+    logger.info('%i Kaiser window size', config.window)
+    logger.info('%0.1f Kaiser alpha parameter', config.alpha)
+
 
     for f in config.files:
         size = os.path.getsize(f.name)
@@ -171,24 +203,16 @@ if __name__ == "__main__":
             valid.append(metadata[i:i+m])
             skip = i + m
 
-    logger.info('Imaging %i subbands, %i images', len(subbands), len(valid))
-    logger.info('%0.2f MHz central frequency', np.array(subbands).mean()*2e2/1024)
-    logger.info('%0.2f MHz bandwidth', len(subbands)*(2e2/1024))
-    logger.info('%i seconds integration time', config.inttime)
-    logger.info('%ix%i pixel resolution', config.res, config.res)
-    logger.info('%i Kaiser window size', config.window)
-    logger.info('%0.1f Kaiser alpha parameter', config.alpha)
-
     L = np.linspace(-1, 1, config.res);
     M = np.linspace(-1, 1, config.res);
     mask = np.ones((config.res, config.res));
     xv,yv = np.meshgrid(L,M);
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
-    freq_hz = np.array(subbands).mean()*(2e8/1024)
     dx = 1.0 / config.res
 
     in_ax = load(config.antpos, subbands)
     out_ax = [(dx, config.res), (dx, config.res)]
 
+    logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
     pool = multiprocessing.Pool(config.nthreads)
     pool.map(image_png, valid)
