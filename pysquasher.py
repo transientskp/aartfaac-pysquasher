@@ -140,6 +140,7 @@ if __name__ == "__main__":
     config = get_configuration()
     try:
         os.makedirs(config.output)
+        logger.info('Created directory \'%s\'', config.output)
     except OSError as exc:
         if exc.errno == errno.EEXIST and os.path.isdir(config.output):
             pass
