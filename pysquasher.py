@@ -7,6 +7,7 @@ import struct
 import sys
 import os
 import datetime
+import pytz
 import argparse
 import logging
 import gfft
@@ -76,11 +77,11 @@ def parse_data(data):
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
 
 
-def process(metadata):
+def image_png(metadata):
     """
     Constructs a single image
     """
-    time = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5)
+    time = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
     metadata.sort(key=lambda x: x[1])
     data = []
     for i in range(len(subbands)):
@@ -190,4 +191,4 @@ if __name__ == "__main__":
     out_ax = [(dx, config.res), (dx, config.res)]
 
     pool = multiprocessing.Pool(config.nthreads)
-    pool.map(process, valid)
+    pool.map(image_png, valid)
