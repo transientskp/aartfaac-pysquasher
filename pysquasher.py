@@ -14,6 +14,7 @@ import argparse
 import logging
 import gfft
 import errno
+from astropy.io import fits
 
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
@@ -80,8 +81,28 @@ def parse_data(data):
     """
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
 
+# Create a png image using 'img' with metadata from 'metadata'
+def write_png (img, metadata):
 
-def image_png(metadata):
+    # Create filename
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (time.strftime("%Y%m%d%H%M%S%Z"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    plt.clf()
+    plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
+    plt.title('F %0.2fMHz - BW %0.2fMHz - T %is - %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, time.strftime("%Y-%m-%d %H:%M:%S %Z")), fontsize=9)
+    plt.colorbar()
+    plt.savefig(os.path.join(config.output, filename))
+    logger.info(filename)
+
+# Create a FITS image using 'img' with metadata from 'metadata'
+def write_fits (img, metadata):
+
+    # Create filename
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (time.strftime("%Y%m%d%H%M%S%Z"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    hdu = fits.PrimaryHDU()
+    hdulist = fits.HDUList ([hdu])
+
+
+def create_img (metadata):
     """
     Constructs a single image
     """
@@ -96,15 +117,8 @@ def image_png(metadata):
             sb.append(parse_data(f.read(LEN_BDY)))
         data.append(np.array(sb).mean(axis=0))
               
-    img = np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha))))
+    return np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha))))
 
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (time.strftime("%Y%m%d%H%M%S%Z"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
-    plt.clf()
-    plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-    plt.title('F %0.2fMHz - BW %0.2fMHz - T %is - %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, time.strftime("%Y-%m-%d %H:%M:%S %Z")), fontsize=9)
-    plt.colorbar()
-    plt.savefig(os.path.join(config.output, filename))
-    logger.info(filename)
 
 
 def load(filename, subbands):
