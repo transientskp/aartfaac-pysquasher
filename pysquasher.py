@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import matplotlib
-matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import numpy as np
 import multiprocessing
@@ -17,6 +16,10 @@ import math
 from astropy.io import fits
 from astropy.time import Time
 
+# Use Agg backed which does not require an X display
+matplotlib.use('Agg')
+
+# Python logging format in similar style to googles c++ glog format
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
 VERSION = '1.0'
@@ -126,7 +129,7 @@ def write_png(img, metadata):
 
 
 def write_fits(img, metadata, fitsobj):
-    imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+    imgtime = Time(metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
 
     imgtime.format='fits'
     imgtime.out_subfmt = 'date_hms'
@@ -134,13 +137,13 @@ def write_fits(img, metadata, fitsobj):
 
     # CRVAL1 should hold RA in degrees. sidereal_time returns hour angle in
     # hours.
-    fitsobj.header['CRVAL1' ] = imgtime.sidereal_time (kind='apparent').value  *  15
-    fitsobj.header['DATE-OBS'] = str (imgtime)
-    t = Time.now ();
+    fitsobj.header['CRVAL1'] = imgtime.sidereal_time(kind='apparent').value  *  15
+    fitsobj.header['DATE-OBS'] = str(imgtime)
+    t = Time.now();
     t.format = 'fits'
-    fitsobj.header['DATE'   ] =  str(t)
-    fitsobj.data [0,0,:,:] = img
-    fitsobj.writeto (filename)
+    fitsobj.header['DATE'] = str(t)
+    fitsobj.data[0, 0, :, :] = img*mask
+    fitsobj.writeto(filename)
     logger.info(filename)
 
 
@@ -157,7 +160,7 @@ def create_empty_fits():
     hdu.header['EQUINOX'] = 2000
     hdu.header['RADESYS'] = 'FK5'
     hdu.header['LONPOLE'] = 180
-    hdu.header['LATPOLE'] = float (LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
+    hdu.header['LATPOLE'] = float(LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
     hdu.header['PC01_01'] = 1
     hdu.header['PC02_01'] = 0
     hdu.header['PC03_01'] = 0
@@ -176,12 +179,12 @@ def create_empty_fits():
     hdu.header['PC04_04'] = 1
     hdu.header['CTYPE1' ] = 'RA---SIN'
     hdu.header['CRVAL1' ] = 0 # Will be filled by imaging thread
-    hdu.header['CDELT1' ] = -math.asin (1/float (config.res/2)) * (180/math.pi)
+    hdu.header['CDELT1' ] = -math.asin(1/float(config.res/2)) * (180/math.pi)
     hdu.header['CRPIX1' ] = config.res/2 + 1
     hdu.header['CUNIT1' ] = 'deg'
     hdu.header['CTYPE2' ] = 'DEC--SIN'
-    hdu.header['CRVAL2' ] = float (LOFAR_CS002_LAT[0:-1])
-    hdu.header['CDELT2' ] = math.asin (1/float (config.res/2)) * (180/math.pi)
+    hdu.header['CRVAL2' ] = float(LOFAR_CS002_LAT[0:-1])
+    hdu.header['CDELT2' ] = math.asin(1/float(config.res/2)) * (180/math.pi)
     hdu.header['CRPIX2' ] = config.res/2 + 1
     hdu.header['CUNIT2' ] = 'deg'
     hdu.header['CTYPE3' ] = 'FREQ'
@@ -206,13 +209,13 @@ def create_empty_fits():
     hdu.header['DATE-OBS'] = ''
     hdu.header['TIMESYS' ] = 'UTC'
     hdu.header['OBSRA'   ] = 0 # Will be filled by imaging thread
-    hdu.header['OBSDEC'  ] = float (LOFAR_CS002_LAT[0:-1])
+    hdu.header['OBSDEC'  ] = float(LOFAR_CS002_LAT[0:-1])
     hdu.header['OBSGEO-X'] = 3.8266e+06 # CS002 center ITRF location
     hdu.header['OBSGEO-Y'] = 4.6102e+05
     hdu.header['OBSGEO-Z'] = 5.0649e+06
     hdu.header['DATE'    ] = '' # Will be filled by imaging thread
     hdu.header['ORIGIN'  ] =  'pysquasher.py'
-    hdu.data = np.zeros ( (1, 1, config.res, config.res) )
+    hdu.data = np.zeros( (1, 1, config.res, config.res) )
 
     return hdu
 
@@ -250,11 +253,11 @@ def load(filename, subbands):
 
     for a1 in range(0, NUM_ANT):
         for a2 in range(0, NUM_ANT):
-            u.append(L[a1,0] - L[a2,0])
-            v.append(L[a1,1] - L[a2,1])
+            u.append(L[a1, 0] - L[a2, 0])
+            v.append(L[a1, 1] - L[a2, 1])
 
     c = 299792458.0
-    return [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in subbands]), \
+    return [np.ravel([(np.array(u)/(c/(s*(2e8/1024))/2.0)) for s in subbands]),
             np.ravel([(np.array(v)/(c/(s*(2e8/1024))/2.0)) for s in subbands])]
 
 
@@ -337,11 +340,11 @@ if __name__ == "__main__":
             valid.append(metadata[i:i+m])
             skip = i + m
 
-    L = np.linspace(-1, 1, config.res);
-    M = np.linspace(-1, 1, config.res);
-    mask = np.ones((config.res, config.res));
-    xv,yv = np.meshgrid(L,M);
-    mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
+    L = np.linspace(-1, 1, config.res)
+    M = np.linspace(-1, 1, config.res)
+    mask = np.ones((config.res, config.res))
+    xv, yv = np.meshgrid(L, M)
+    mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN
     fitshdu = create_empty_fits()
 
     logging.info('Imaging %i images to \'%s\' using %i threads', len(valid), config.type, config.nthreads)
