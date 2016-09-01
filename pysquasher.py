@@ -93,7 +93,7 @@ def image_png (metadata):
 def image_fits (metadata):
     fitshdu = create_empty_fits (metadata)
     img = create_img (metadata)
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     write_fits (img, metadata, fitshdu)
 
 # Create a png image using 'img' with metadata from 'metadata'
@@ -114,26 +114,28 @@ def write_png (img, metadata):
 
 # Create a FITS image using 'img' with metadata from 'metadata'
 def write_fits (img, metadata, fitsobj):
-
     imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
-    # datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
 
     # Create filename
+    imgtime.format='fits'
     imgtime.out_subfmt = 'date_hms'
     filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime, np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
 
     # CRVAL1 should hold RA in degrees. sidereal_time returns hour angle in
     # hours.
-#    fitsobj.header['CRVAL1' ] = imgtime.sidereal_time (kind='apparent') *  15
-#    fitsobj.header['DATE-OBS'] = imgtime.strftime ("%Y-%m-%dT%H:%M:%S")
-#    fitsobj.header['DATE'   ] =  Time.now ().strftime ("%Y-%m-%dT%H:%M:%S")
-#    fitsobj.data [0,0,:,:] = img
-#    fitsobj.writeto (filename)
-#    logger.info(filename)
+    fitsobj.header['CRVAL1' ] = imgtime.sidereal_time (kind='apparent').value  *  15
+    fitsobj.header['DATE-OBS'] = str (imgtime)
+    t = Time.now ();
+    t.format = 'fits'
+    fitsobj.header['DATE'   ] =  str(t)
+    fitsobj.data [0,0,:,:] = img
+    fitsobj.writeto (filename)
+    logger.info(filename)
 
-# Create a one time fits file, to be deep copied and populated by imaging threads
+# Create an empty fits file with required headers
 def create_empty_fits (metadata):
-    # imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+    imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+    imgtime.format ='fits'
     # imgtime = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
     hdu = fits.PrimaryHDU()
 
@@ -194,14 +196,16 @@ def create_empty_fits (metadata):
     hdu.header['VELREF' ] = 257
     hdu.header['TELESCOP'] = 'AARTFAAC'
     hdu.header['OBSERVER'] = 'AARTFAAC Project'
-    hdu.header['DATE-OBS'] = '0' # Will be filled by imaging thread
+    hdu.header['DATE-OBS'] = str (imgtime) # Will be updated by imaging thread
     hdu.header['TIMESYS' ] = 'UTC'
     hdu.header['OBSRA'   ] = 0 # Will be filled by imaging thread
     hdu.header['OBSDEC'  ] = float (LOFAR_CS002_LAT[0:-1])
     hdu.header['OBSGEO-X'] = 3.8266e+06 # CS002 center ITRF location
     hdu.header['OBSGEO-Y'] = 4.6102e+05
     hdu.header['OBSGEO-Z'] = 5.0649e+06
-    hdu.header['DATE'    ] = '0' # Will be filled by imaging thread
+    tnow = Time.now()
+    tnow.format = 'fits'
+    hdu.header['DATE'    ] = str (tnow) # Will be filled by imaging thread
     hdu.header['ORIGIN'  ] =  'pysquasher.py'
 
     hdu.data = np.zeros ( (1, 1, config.res, config.res) )
@@ -209,6 +213,7 @@ def create_empty_fits (metadata):
     return hdu
 
 
+# Convert visibilities to image
 def create_img (metadata):
     """
     Constructs a single image
@@ -292,13 +297,13 @@ if __name__ == "__main__":
     freq_hz = np.mean(subbands)*(2e8/1024)
     bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
 
-    logger.info('%i subbands', len(subbands))
-    logger.info('%0.2f MHz central frequency', freq_hz*1e-6)
-    logger.info('%0.2f MHz bandwidth', bw_hz*1e-6)
-    logger.info('%i seconds integration time', config.inttime)
-    logger.info('%ix%i pixel resolution', config.res, config.res)
-    logger.info('%i Kaiser window size', config.window)
-    logger.info('%0.1f Kaiser alpha parameter', config.alpha)
+    logger.info('<-- %i subbands', len(subbands))
+    logger.info('<-- %0.2f MHz central frequency', freq_hz*1e-6)
+    logger.info('<-- %0.2f MHz bandwidth', bw_hz*1e-6)
+    logger.info('<-- %i seconds integration time', config.inttime)
+    logger.info('<-- %ix%i pixel resolution', config.res, config.res)
+    logger.info('<-- %i Kaiser window size', config.window)
+    logger.info('<-- %0.1f Kaiser alpha parameter', config.alpha)
 
 
     for f in config.files:
