@@ -6,7 +6,6 @@ from matplotlib import pyplot as plt
 import numpy as np
 import multiprocessing
 import struct
-import sys
 import os
 import datetime
 import pytz
@@ -14,7 +13,9 @@ import argparse
 import logging
 import gfft
 import errno
+import math
 from astropy.io import fits
+from astropy.time import Time
 
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
@@ -23,6 +24,8 @@ NUM_ANT = 288
 LEN_HDR = 512
 LEN_BDY = NUM_ANT**2 * 8
 HDR_MAGIC = 0x4141525446414143
+LOFAR_CS002_LONG = '6.869837540d'
+LOFAR_CS002_LAT  = '52.915122495d'
 
 def get_configuration():
     """
@@ -45,6 +48,8 @@ def get_configuration():
             help="Number of threads to use for imaging (default: %(default)s)")
     parser.add_argument('--output', type=str, default=os.getcwd(),
             help="Output directory (default: %(default)s)")
+    parser.add_argument('--type', type=str, default='png',
+            help="Type of output file required (default: %(default)s)")
 
     return parser.parse_args()
 
@@ -81,32 +86,133 @@ def parse_data(data):
     """
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
 
+def image_png (metadata):
+    img = create_img (metadata)
+    write_png (img, metadata)
+
+def image_fits (metadata):
+    fitshdu = create_empty_fits (metadata)
+    img = create_img (metadata)
+    import pdb; pdb.set_trace()
+    write_fits (img, metadata, fitshdu)
+
 # Create a png image using 'img' with metadata from 'metadata'
 def write_png (img, metadata):
 
+    # imgtime = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
+    imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+    # imgtime.out_subfmt = 'date_hms'
+
     # Create filename
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (time.strftime("%Y%m%d%H%M%S%Z"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (imgtime, np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
     plt.clf()
     plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-    plt.title('F %0.2fMHz - BW %0.2fMHz - T %is - %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, time.strftime("%Y-%m-%d %H:%M:%S %Z")), fontsize=9)
+    plt.title('F %0.2fMHz - BW %0.2fMHz - Tint %0.2fsec, T is - %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, imgtime), fontsize=9)
     plt.colorbar()
     plt.savefig(os.path.join(config.output, filename))
     logger.info(filename)
 
 # Create a FITS image using 'img' with metadata from 'metadata'
-def write_fits (img, metadata):
+def write_fits (img, metadata, fitsobj):
+
+    imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+    # datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
 
     # Create filename
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (time.strftime("%Y%m%d%H%M%S%Z"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    imgtime.out_subfmt = 'date_hms'
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime, np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+
+    # CRVAL1 should hold RA in degrees. sidereal_time returns hour angle in
+    # hours.
+#    fitsobj.header['CRVAL1' ] = imgtime.sidereal_time (kind='apparent') *  15
+#    fitsobj.header['DATE-OBS'] = imgtime.strftime ("%Y-%m-%dT%H:%M:%S")
+#    fitsobj.header['DATE'   ] =  Time.now ().strftime ("%Y-%m-%dT%H:%M:%S")
+#    fitsobj.data [0,0,:,:] = img
+#    fitsobj.writeto (filename)
+#    logger.info(filename)
+
+# Create a one time fits file, to be deep copied and populated by imaging threads
+def create_empty_fits (metadata):
+    # imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+    # imgtime = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
     hdu = fits.PrimaryHDU()
-    hdulist = fits.HDUList ([hdu])
+
+    hdu.header['BSCALE' ] =  1
+    hdu.header['BZERO'  ] =  0
+    hdu.header['BMAJ'   ] =  1
+    hdu.header['BMIN'   ] =  1
+    hdu.header['BPA'    ] =  0
+    hdu.header['BTYPE'  ] = 'Intensity'
+    hdu.header['OBJECT' ] = 'Aartfaac image'
+    hdu.header['BUNIT'  ] = 'Jy/beam'
+    hdu.header['EQUINOX'] = 2000
+    hdu.header['RADESYS'] = 'FK5'
+    hdu.header['LONPOLE'] = 180
+    hdu.header['LATPOLE'] = float (LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
+    hdu.header['PC01_01'] = 1
+    hdu.header['PC02_01'] = 0
+    hdu.header['PC03_01'] = 0
+    hdu.header['PC04_01'] = 0
+    hdu.header['PC01_02'] = 0
+    hdu.header['PC02_02'] = 1
+    hdu.header['PC03_02'] = 0
+    hdu.header['PC04_02'] = 0
+    hdu.header['PC01_03'] = 0
+    hdu.header['PC02_03'] = 0
+    hdu.header['PC03_03'] = 1
+    hdu.header['PC04_03'] = 0
+    hdu.header['PC01_04'] = 0
+    hdu.header['PC02_04'] = 0
+    hdu.header['PC03_04'] = 0
+    hdu.header['PC04_04'] = 1
+    hdu.header['CTYPE1' ] = 'RA---SIN'
+    hdu.header['CRVAL1' ] = 0 # Will be filled by imaging thread
+    hdu.header['CDELT1' ] = -math.asin (1/(config.res/2)) * (180/math.pi)
+    hdu.header['CRPIX1' ] = config.res/2 + 1
+    hdu.header['CUNIT1' ] = 'deg'
+    hdu.header['CTYPE2' ] = 'DEC--SIN'
+    hdu.header['CRVAL2' ] = float (LOFAR_CS002_LAT[0:-1])
+    hdu.header['CDELT2' ] = math.asin (1/(config.res/2)) * (180/math.pi)
+    hdu.header['CRPIX2' ] = config.res/2 + 1
+    hdu.header['CUNIT2' ] = 'deg'
+    hdu.header['CTYPE3' ] = 'FREQ'
+    hdu.header['CRVAL3' ] = freq_hz
+    hdu.header['CDELT3' ] = bw_hz
+    hdu.header['CRPIX3' ] = 1
+    hdu.header['CUNIT3' ] = 'Hz'
+    hdu.header['CTYPE4' ] = 'STOKES'
+    hdu.header['CRVAL4' ] = 1
+    hdu.header['CDELT4' ] = 1
+    hdu.header['CRPIX4' ] = 1
+    hdu.header['CUNIT4' ] = 'stokes-unit'
+    hdu.header['PV2_1'  ] = 0
+    hdu.header['PV2_2'  ] = 0
+    hdu.header['RESTFRQ'] = freq_hz
+    hdu.header['SPECSYS'] = 'LSRK'
+    hdu.header['ALTRVAL'] = 0
+    hdu.header['ALTRPIX'] = 1
+    hdu.header['VELREF' ] = 257
+    hdu.header['TELESCOP'] = 'AARTFAAC'
+    hdu.header['OBSERVER'] = 'AARTFAAC Project'
+    hdu.header['DATE-OBS'] = '0' # Will be filled by imaging thread
+    hdu.header['TIMESYS' ] = 'UTC'
+    hdu.header['OBSRA'   ] = 0 # Will be filled by imaging thread
+    hdu.header['OBSDEC'  ] = float (LOFAR_CS002_LAT[0:-1])
+    hdu.header['OBSGEO-X'] = 3.8266e+06 # CS002 center ITRF location
+    hdu.header['OBSGEO-Y'] = 4.6102e+05
+    hdu.header['OBSGEO-Z'] = 5.0649e+06
+    hdu.header['DATE'    ] = '0' # Will be filled by imaging thread
+    hdu.header['ORIGIN'  ] =  'pysquasher.py'
+
+    hdu.data = np.zeros ( (1, 1, config.res, config.res) )
+
+    return hdu
 
 
 def create_img (metadata):
     """
     Constructs a single image
     """
-    time = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
     metadata.sort(key=lambda x: x[1])
     data = []
     for i in range(len(subbands)):
@@ -116,7 +222,7 @@ def create_img (metadata):
             f.seek(v[4])
             sb.append(parse_data(f.read(LEN_BDY)))
         data.append(np.array(sb).mean(axis=0))
-              
+
     return np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha))))
 
 
@@ -229,6 +335,18 @@ if __name__ == "__main__":
     xv,yv = np.meshgrid(L,M);
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
 
+
     logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
     pool = multiprocessing.Pool(config.nthreads)
-    pool.map(image_png, valid)
+    if config.type  == 'png':
+        logging.info ('Creating PNG images.')
+        pool.map (image_png, valid)
+    else:
+        logging.info('Creating FITS images.')
+#        try:
+#            hdu = create_empty_fits (metadata)
+#        except Exception as e:
+#            print '### Exception in creating FITS file singleton: now' % e
+#            os.sys.exit (-1)
+
+        pool.map (image_fits, valid)
