@@ -48,7 +48,8 @@ def get_configuration():
             help="Number of threads to use for imaging (default: %(default)s)")
     parser.add_argument('--output', type=str, default=os.getcwd(),
             help="Output directory (default: %(default)s)")
-    parser.add_argument('--type', type=str, default='png',
+    types = ['png', 'fits', 'both']
+    parser.add_argument('--type', type=str, choices=types, default=types[1],
             help="Type of output file required (default: %(default)s)")
 
     return parser.parse_args()
@@ -60,19 +61,19 @@ def parse_header(hdr):
 
     struct output_header_t
     {
-      uint64_t magic;                   ///< magic to determine header
-      double start_time;                ///< start time (unix)
-      double end_time;                  ///< end time (unix)
-      int32_t subband;                  ///< lofar subband
-      int32_t num_dipoles;              ///< number of dipoles (288 or 576)
-      int32_t polarization;             ///< XX=0, YY=1
-      int32_t num_channels;             ///< number of channels (<= 64)
-      float ateam_flux[5];              ///< Ateam fluxes (CasA, CygA, Tau, Vir, Sun)
-      std::bitset<5> ateam;             ///< Ateam active
-      std::bitset<64> flagged_channels; ///< bitset of flagged channels (8 byte)
-      std::bitset<576> flagged_dipoles; ///< bitset of flagged dipoles (72 byte)
-      uint32_t weights[78];             ///< stationweights n*(n+1)/2, n in {6, 12}
-      uint8_t pad[48];                  ///< 512 byte block
+      uint64_t magic;                   ///< magic to determine header                (  8 B)
+      double start_time;                ///< start time (unix)                        (  8 B)
+      double end_time;                  ///< end time (unix)                          (  8 B)
+      int32_t subband;                  ///< lofar subband                            (  4 B)
+      int32_t num_dipoles;              ///< number of dipoles (288 or 576)           (  4 B)
+      int32_t polarization;             ///< XX=0, YY=1                               (  4 B)
+      int32_t num_channels;             ///< number of channels (<= 64)               (  4 B)
+      float ateam_flux[5];              ///< Ateam fluxes (CasA, CygA, Tau, Vir, Sun) ( 24 B)
+      std::bitset<5> ateam;             ///< Ateam active                             (  8 B)
+      std::bitset<64> flagged_channels; ///< bitset of flagged channels               (  8 B)
+      std::bitset<576> flagged_dipoles; ///< bitset of flagged dipoles                ( 72 B)
+      uint32_t weights[78];             ///< stationweights n*(n+1)/2, n in {6, 12}   (312 B)
+      uint8_t pad[48];                  ///< 512 byte block                           ( 48 B)
     };
     """
     m, t0, t1, s, d, p, c = struct.unpack("<Qddiiii", hdr[0:40])
@@ -86,40 +87,50 @@ def parse_data(data):
     """
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
 
-def image_png (metadata):
-    img = create_img (metadata)
-    write_png (img, metadata)
 
-def image_fits (metadata):
-    fitshdu = create_empty_fits (metadata)
-    img = create_img (metadata)
-    # import pdb; pdb.set_trace()
-    write_fits (img, metadata, fitshdu)
+def image_both(metadata):
+    """
+    Create and write both png and fits images
+    """
+    img = create_img(metadata)
+    write_png(img, metadata)
+    write_fits(img, metadata, fitshdu)
 
-# Create a png image using 'img' with metadata from 'metadata'
-def write_png (img, metadata):
 
-    # imgtime = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
-    imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
-    # imgtime.out_subfmt = 'date_hms'
+def image_png(metadata):
+    """
+    Create and write png image
+    """
+    img = create_img(metadata)
+    write_png(img, metadata)
 
-    # Create filename
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (imgtime, np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+
+def image_fits(metadata):
+    """
+    Create and write fits image
+    """
+    img = create_img(metadata)
+    write_fits(img, metadata, fitshdu)
+
+
+def write_png(img, metadata):
+    imgtime = Time(metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
+
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
     plt.clf()
     plt.imshow(img*mask, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-    plt.title('F %0.2fMHz - BW %0.2fMHz - Tint %0.2fsec, T is - %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, imgtime), fontsize=9)
+    plt.title('F %0.2fMHz - BW %0.2fMHz - Tint %0.2fsec, T %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, imgtime.datetime.strftime("%Y-%m-%d %H:%M:%S UTC")), fontsize=9)
     plt.colorbar()
     plt.savefig(os.path.join(config.output, filename))
     logger.info(filename)
 
-# Create a FITS image using 'img' with metadata from 'metadata'
-def write_fits (img, metadata, fitsobj):
+
+def write_fits(img, metadata, fitsobj):
     imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
 
-    # Create filename
     imgtime.format='fits'
     imgtime.out_subfmt = 'date_hms'
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime, np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
 
     # CRVAL1 should hold RA in degrees. sidereal_time returns hour angle in
     # hours.
@@ -132,13 +143,9 @@ def write_fits (img, metadata, fitsobj):
     fitsobj.writeto (filename)
     logger.info(filename)
 
-# Create an empty fits file with required headers
-def create_empty_fits (metadata):
-    imgtime = Time (metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
-    imgtime.format ='fits'
-    # imgtime = datetime.datetime.utcfromtimestamp(metadata[0][0]+config.inttime*0.5).replace(tzinfo=pytz.utc)
-    hdu = fits.PrimaryHDU()
 
+def create_empty_fits():
+    hdu = fits.PrimaryHDU()
     hdu.header['BSCALE' ] =  1
     hdu.header['BZERO'  ] =  0
     hdu.header['BMAJ'   ] =  1
@@ -196,25 +203,22 @@ def create_empty_fits (metadata):
     hdu.header['VELREF' ] = 257
     hdu.header['TELESCOP'] = 'AARTFAAC'
     hdu.header['OBSERVER'] = 'AARTFAAC Project'
-    hdu.header['DATE-OBS'] = str (imgtime) # Will be updated by imaging thread
+    hdu.header['DATE-OBS'] = ''
     hdu.header['TIMESYS' ] = 'UTC'
     hdu.header['OBSRA'   ] = 0 # Will be filled by imaging thread
     hdu.header['OBSDEC'  ] = float (LOFAR_CS002_LAT[0:-1])
     hdu.header['OBSGEO-X'] = 3.8266e+06 # CS002 center ITRF location
     hdu.header['OBSGEO-Y'] = 4.6102e+05
     hdu.header['OBSGEO-Z'] = 5.0649e+06
-    tnow = Time.now()
-    tnow.format = 'fits'
-    hdu.header['DATE'    ] = str (tnow) # Will be filled by imaging thread
+    hdu.header['DATE'    ] = '' # Will be filled by imaging thread
     hdu.header['ORIGIN'  ] =  'pysquasher.py'
-
     hdu.data = np.zeros ( (1, 1, config.res, config.res) )
 
     return hdu
 
 
 # Convert visibilities to image
-def create_img (metadata):
+def create_img(metadata):
     """
     Constructs a single image
     """
@@ -297,14 +301,13 @@ if __name__ == "__main__":
     freq_hz = np.mean(subbands)*(2e8/1024)
     bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
 
-    logger.info('<-- %i subbands', len(subbands))
-    logger.info('<-- %0.2f MHz central frequency', freq_hz*1e-6)
-    logger.info('<-- %0.2f MHz bandwidth', bw_hz*1e-6)
-    logger.info('<-- %i seconds integration time', config.inttime)
-    logger.info('<-- %ix%i pixel resolution', config.res, config.res)
-    logger.info('<-- %i Kaiser window size', config.window)
-    logger.info('<-- %0.1f Kaiser alpha parameter', config.alpha)
-
+    logger.info('%i subbands', len(subbands))
+    logger.info('%0.2f MHz central frequency', freq_hz*1e-6)
+    logger.info('%0.2f MHz bandwidth', bw_hz*1e-6)
+    logger.info('%i seconds integration time', config.inttime)
+    logger.info('%ix%i pixel resolution', config.res, config.res)
+    logger.info('%i Kaiser window size', config.window)
+    logger.info('%0.1f Kaiser alpha parameter', config.alpha)
 
     for f in config.files:
         size = os.path.getsize(f.name)
@@ -339,19 +342,13 @@ if __name__ == "__main__":
     mask = np.ones((config.res, config.res));
     xv,yv = np.meshgrid(L,M);
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN;
+    fitshdu = create_empty_fits()
 
-
-    logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
+    logging.info('Imaging %i images to \'%s\' using %i threads', len(valid), config.type, config.nthreads)
     pool = multiprocessing.Pool(config.nthreads)
     if config.type  == 'png':
-        logging.info ('Creating PNG images.')
-        pool.map (image_png, valid)
+        pool.map(image_png, valid)
+    elif config.type == 'fits':
+        pool.map(image_fits, valid)
     else:
-        logging.info('Creating FITS images.')
-#        try:
-#            hdu = create_empty_fits (metadata)
-#        except Exception as e:
-#            print '### Exception in creating FITS file singleton: now' % e
-#            os.sys.exit (-1)
-
-        pool.map (image_fits, valid)
+        pool.map(image_both, valid)
