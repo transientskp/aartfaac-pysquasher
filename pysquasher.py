@@ -228,7 +228,7 @@ def create_img (metadata):
             sb.append(parse_data(f.read(LEN_BDY)))
         data.append(np.array(sb).mean(axis=0))
 
-    return np.fliplr(np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha))))
+    return np.rot90 (np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha)), 3)
 
 
 
