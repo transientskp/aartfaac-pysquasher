@@ -169,12 +169,12 @@ def create_empty_fits (metadata):
     hdu.header['PC04_04'] = 1
     hdu.header['CTYPE1' ] = 'RA---SIN'
     hdu.header['CRVAL1' ] = 0 # Will be filled by imaging thread
-    hdu.header['CDELT1' ] = -math.asin (1/(config.res/2)) * (180/math.pi)
+    hdu.header['CDELT1' ] = -math.asin (1/float (config.res/2)) * (180/math.pi)
     hdu.header['CRPIX1' ] = config.res/2 + 1
     hdu.header['CUNIT1' ] = 'deg'
     hdu.header['CTYPE2' ] = 'DEC--SIN'
     hdu.header['CRVAL2' ] = float (LOFAR_CS002_LAT[0:-1])
-    hdu.header['CDELT2' ] = math.asin (1/(config.res/2)) * (180/math.pi)
+    hdu.header['CDELT2' ] = math.asin (1/float (config.res/2)) * (180/math.pi)
     hdu.header['CRPIX2' ] = config.res/2 + 1
     hdu.header['CUNIT2' ] = 'deg'
     hdu.header['CTYPE3' ] = 'FREQ'
