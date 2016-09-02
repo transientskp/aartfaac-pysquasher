@@ -144,7 +144,7 @@ def write_fits(img, metadata, fitsobj):
     t.format = 'fits'
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
-    fitsobj.writeto(filename)
+    fitsobj.writeto(os.path.join(config.output, filename))
     logger.info(filename)
 
 
