@@ -52,9 +52,6 @@ def get_configuration():
             help="Number of threads to use for imaging (default: %(default)s)")
     parser.add_argument('--output', type=str, default=os.getcwd(),
             help="Output directory (default: %(default)s)")
-    types = ['png', 'fits', 'both']
-    parser.add_argument('--type', type=str, choices=types, default=types[1],
-            help="Type of output file required (default: %(default)s)")
 
     return parser.parse_args()
 
@@ -92,41 +89,12 @@ def parse_data(data):
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
 
 
-def image_both(metadata):
-    """
-    Create and write both png and fits images
-    """
-    img = create_img(metadata)
-    write_png(img, metadata)
-    write_fits(img, metadata, fitshdu)
-
-
-def image_png(metadata):
-    """
-    Create and write png image
-    """
-    img = create_img(metadata)
-    write_png(img, metadata)
-
-
 def image_fits(metadata):
     """
     Create and write fits image
     """
     img = create_img(metadata)
     write_fits(img, metadata, fitshdu)
-
-
-def write_png(img, metadata):
-    imgtime = Time(metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
-
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
-    plt.clf()
-    plt.imshow(img, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-    plt.title('F %0.2fMHz - BW %0.2fMHz - Tint %0.2fsec, T %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, imgtime.datetime.strftime("%Y-%m-%d %H:%M:%S UTC")), fontsize=9)
-    plt.colorbar()
-    plt.savefig(os.path.join(config.output, filename))
-    logger.info(filename)
 
 
 def write_fits(img, metadata, fitsobj):
@@ -348,11 +316,6 @@ if __name__ == "__main__":
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN
     fitshdu = create_empty_fits()
 
-    logging.info('Imaging %i images to \'%s\' using %i threads', len(valid), config.type, config.nthreads)
+    logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
     pool = multiprocessing.Pool(config.nthreads)
-    if config.type  == 'png':
-        pool.map(image_png, valid)
-    elif config.type == 'fits':
-        pool.map(image_fits, valid)
-    else:
-        pool.map(image_both, valid)
+    pool.map(image_fits, valid)
