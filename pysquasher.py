@@ -78,8 +78,9 @@ def parse_header(hdr):
     };
     """
     m, t0, t1, s, d, p, c = struct.unpack("<Qddiiii", hdr[0:40])
+    f = np.frombuffer(hdr[80:152], dtype=np.uint64)
     assert(m == HDR_MAGIC)
-    return (m, t0, t1, s, d, p, c)
+    return (m, t0, t1, s, d, p, c, f)
 
 
 def parse_data(data):
@@ -254,12 +255,12 @@ if __name__ == "__main__":
     subbands = []
 
     for f in config.files:
-        _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_first = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
         size = os.path.getsize(f.name)
         n = size/(LEN_BDY+LEN_HDR)
         f.seek((n-1)*(LEN_BDY+LEN_HDR))
-        _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_last = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
         logger.info('parsing \'%s\' (%i bytes) %s - %s',
                     os.path.basename(f.name), size,
@@ -289,8 +290,14 @@ if __name__ == "__main__":
         N = size/(LEN_BDY+LEN_HDR)
 
         for i in range(N):
-            m, t0, t1, s, d, p, c = parse_header(f.read(LEN_HDR))
-            metadata.append((t0, s, p, f.name, f.tell()))
+            m, t0, t1, s, d, p, c, fl = parse_header(f.read(LEN_HDR))
+            flagged = []
+            for j,v in enumerate(fl):
+                for k in range(64):
+                    if np.bitwise_and(v, np.uint64(1<<k)):
+                        flagged.append(j*64+k)
+
+            metadata.append((t0, s, p, f.name, f.tell(), flagged))
             f.seek(f.tell()+LEN_BDY)
 
         f.close()
