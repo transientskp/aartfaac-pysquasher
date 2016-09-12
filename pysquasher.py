@@ -109,8 +109,10 @@ def write_fits(img, metadata, fitsobj):
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
     fitsobj.writeto(os.path.join(config.output, filename))
-    quality = rms.rms_with_clipped_subregion(img)
-    logger.info("%s %0.3f %i:%i", filename, quality, int(round(img[np.logical_not(np.isnan(img))].max())), int(round(quality)))
+    data = img[np.logical_not(np.isnan(img))]
+    quality = rms.rms(rms.clip(data))
+    high = data.max()
+    logger.info("%s %0.3f %i:%i", filename, quality, int(round(high)), int(round(quality)))
 
 
 def create_empty_fits():
