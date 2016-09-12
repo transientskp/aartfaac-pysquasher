@@ -99,6 +99,11 @@ def write_fits(img, metadata, fitsobj):
     imgtime.format='fits'
     imgtime.out_subfmt = 'date_hms'
     filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    filename = os.path.join(config.output, filename)
+
+    if os.path.exists(filename):
+        logger.info("'%s' exists - skipping", filename)
+        return
 
     # CRVAL1 should hold RA in degrees. sidereal_time returns hour angle in
     # hours.
@@ -108,7 +113,7 @@ def write_fits(img, metadata, fitsobj):
     t.format = 'fits'
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
-    fitsobj.writeto(os.path.join(config.output, filename))
+    fitsobj.writeto(filename)
     data = img[np.logical_not(np.isnan(img))]
     quality = rms.rms(rms.clip(data))
     high = data.max()
