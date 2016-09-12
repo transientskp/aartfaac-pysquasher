@@ -37,7 +37,7 @@ def get_configuration():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('files', metavar='FILE', type=argparse.FileType('r'), nargs='+',
-            help="Files containing calibrated visibilities")
+            help="Files containing calibrated visibilities, supports glob patterns")
     parser.add_argument('--res', type=int, default=1024,
             help="Image output resolution (default: %(default)s)")
     parser.add_argument('--window', type=int, default=6,
@@ -261,11 +261,14 @@ if __name__ == "__main__":
         f.seek((n-1)*(LEN_BDY+LEN_HDR))
         _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_last = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
-        logger.info('parsing \'%s\' (%i bytes)', os.path.basename(f.name), size)
-        logger.info('  %s start time', datetime.datetime.strftime(utc_first, '%Y-%d-%m %H:%M:%S %Z'))
-        logger.info('  %s end time', datetime.datetime.strftime(utc_last, '%Y-%d-%m %H:%M:%S %Z'))
+        logger.info('parsing \'%s\' (%i bytes) %s - %s',
+                    os.path.basename(f.name), size,
+                    datetime.datetime.strftime(utc_first, '%Y-%d-%m %H:%M:%S %Z'),
+                    datetime.datetime.strftime(utc_last, '%Y-%d-%m %H:%M:%S %Z'))
         subbands.append(s)
         f.seek(0)
+
+    subbands.sort()
 
     dx = 1.0 / config.res
     in_ax = load(config.antpos, subbands)
