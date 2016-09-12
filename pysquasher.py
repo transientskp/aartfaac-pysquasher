@@ -11,14 +11,9 @@ import logging
 import gfft
 import errno
 import math
+import rms
 from astropy.io import fits
 from astropy.time import Time
-
-# Use Agg backed which does not require an X display
-import matplotlib
-matplotlib.use('Agg')
-from matplotlib import pyplot as plt
-
 
 # Python logging format in similar style to googles c++ glog format
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
@@ -114,7 +109,8 @@ def write_fits(img, metadata, fitsobj):
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
     fitsobj.writeto(os.path.join(config.output, filename))
-    logger.info(filename)
+    quality = rms.rms_with_clipped_subregion(img)
+    logger.info("%s %0.3f %i:%i", filename, quality, int(round(img[np.logical_not(np.isnan(img))].max())), int(round(quality)))
 
 
 def create_empty_fits():
