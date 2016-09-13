@@ -110,7 +110,7 @@ def write_fits(img, metadata, fitsobj):
     fitsobj.header['CRVAL1'] = imgtime.sidereal_time(kind='apparent').value  *  15
     fitsobj.header['DATE-OBS'] = str(imgtime)
     t = Time.now();
-    t.format = 'fits'
+    t.format = 'isot'
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
     fitsobj.writeto(filename)
