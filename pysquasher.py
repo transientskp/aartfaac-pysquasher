@@ -96,7 +96,7 @@ def image_fits(metadata):
 def write_fits(img, metadata, fitsobj):
     imgtime = Time(metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
 
-    imgtime.format='fits'
+    imgtime.format='isot'
     imgtime.out_subfmt = 'date_hms'
     filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
     filename = os.path.join(config.output, filename)
