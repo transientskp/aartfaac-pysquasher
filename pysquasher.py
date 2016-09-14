@@ -13,7 +13,7 @@ import errno
 import math
 import rms
 from astropy.io import fits
-from astropy.time import Time
+from astropy.time import Time, TimeDelta
 
 # Python logging format in similar style to googles c++ glog format
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
@@ -109,6 +109,8 @@ def write_fits(img, metadata, fitsobj):
     # hours.
     fitsobj.header['CRVAL1'] = imgtime.sidereal_time(kind='apparent').value  *  15
     fitsobj.header['DATE-OBS'] = str(imgtime)
+    imgtime_end = imgtime + TimeDelta(config.inttime, format='sec')
+    fitsobj.header['END_UTC'] = str(imgtime_end)
     t = Time.now();
     t.format = 'isot'
     fitsobj.header['DATE'] = str(t)
@@ -117,67 +119,81 @@ def write_fits(img, metadata, fitsobj):
     data = img[np.logical_not(np.isnan(img))]
     quality = rms.rms(rms.clip(data))
     high = data.max()
+    low = data.min()
+    fitsobj.header['DATAMAX'] = high
+    fitsobj.header['DATAMIN'] = low
+    fitsobj.header['HISTORY'] = 'AARTFAAC 6 stations superterp'
+    fitsobj.header['HISTORY'] = 'RMS {}'.format(quality)
+    fitsobj.header['HISTORY'] = 'DYNAMIC RANGE {}:{}'.format(int(round(high)), int(round(quality)))
     logger.info("%s %0.3f %i:%i", filename, quality, int(round(high)), int(round(quality)))
 
 
 def create_empty_fits():
+    """
+    See http://heasarc.gsfc.nasa.gov/docs/fcg/standard_dict.html for details
+    """
     hdu = fits.PrimaryHDU()
-    hdu.header['BSCALE' ] =  1
-    hdu.header['BZERO'  ] =  0
-    hdu.header['BMAJ'   ] =  1
-    hdu.header['BMIN'   ] =  1
-    hdu.header['BPA'    ] =  0
-    hdu.header['BTYPE'  ] = 'Intensity'
-    hdu.header['OBJECT' ] = 'Aartfaac image'
-    hdu.header['BUNIT'  ] = 'Jy/beam'
-    hdu.header['EQUINOX'] = 2000
-    hdu.header['RADESYS'] = 'FK5'
-    hdu.header['LONPOLE'] = 180
-    hdu.header['LATPOLE'] = float(LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
-    hdu.header['PC01_01'] = 1
-    hdu.header['PC02_01'] = 0
-    hdu.header['PC03_01'] = 0
-    hdu.header['PC04_01'] = 0
-    hdu.header['PC01_02'] = 0
-    hdu.header['PC02_02'] = 1
-    hdu.header['PC03_02'] = 0
-    hdu.header['PC04_02'] = 0
-    hdu.header['PC01_03'] = 0
-    hdu.header['PC02_03'] = 0
-    hdu.header['PC03_03'] = 1
-    hdu.header['PC04_03'] = 0
-    hdu.header['PC01_04'] = 0
-    hdu.header['PC02_04'] = 0
-    hdu.header['PC03_04'] = 0
-    hdu.header['PC04_04'] = 1
-    hdu.header['CTYPE1' ] = 'RA---SIN'
-    hdu.header['CRVAL1' ] = 0 # Will be filled by imaging thread
-    hdu.header['CDELT1' ] = -math.asin(1/float(config.res/2)) * (180/math.pi)
-    hdu.header['CRPIX1' ] = config.res/2 + 1
-    hdu.header['CUNIT1' ] = 'deg'
-    hdu.header['CTYPE2' ] = 'DEC--SIN'
-    hdu.header['CRVAL2' ] = float(LOFAR_CS002_LAT[0:-1])
-    hdu.header['CDELT2' ] = math.asin(1/float(config.res/2)) * (180/math.pi)
-    hdu.header['CRPIX2' ] = config.res/2 + 1
-    hdu.header['CUNIT2' ] = 'deg'
-    hdu.header['CTYPE3' ] = 'FREQ'
-    hdu.header['CRVAL3' ] = freq_hz
-    hdu.header['CDELT3' ] = bw_hz
-    hdu.header['CRPIX3' ] = 1
-    hdu.header['CUNIT3' ] = 'Hz'
-    hdu.header['CTYPE4' ] = 'STOKES'
-    hdu.header['CRVAL4' ] = 1
-    hdu.header['CDELT4' ] = 1
-    hdu.header['CRPIX4' ] = 1
-    hdu.header['CUNIT4' ] = 'stokes-unit'
-    hdu.header['PV2_1'  ] = 0
-    hdu.header['PV2_2'  ] = 0
-    hdu.header['RESTFRQ'] = freq_hz
-    hdu.header['SPECSYS'] = 'LSRK'
-    hdu.header['ALTRVAL'] = 0
-    hdu.header['ALTRPIX'] = 1
-    hdu.header['VELREF' ] = 257
-    hdu.header['TELESCOP'] = 'AARTFAAC'
+    hdu.header['SIMPLE'  ] = 'F'
+    hdu.header['AUTHOR'  ] = 'pysquasher.py - https://github.com/transientskp/aartfaac-pysquasher'
+    hdu.header['REFERENC'] = 'http://aartfaac.org/'
+    hdu.header['BSCALE'  ] =  1
+    hdu.header['BZERO'   ] =  0
+    hdu.header['BMAJ'    ] =  1
+    hdu.header['BMIN'    ] =  1
+    hdu.header['BPA'     ] =  0
+    hdu.header['BTYPE'   ] = 'Intensity'
+    hdu.header['OBJECT'  ] = 'Aartfaac image'
+    hdu.header['BUNIT'   ] = 'Jy/beam'
+    hdu.header['EQUINOX' ] = 2000
+    hdu.header['RADESYS' ] = 'FK5'
+    hdu.header['LONPOLE' ] = 180
+    hdu.header['LATPOLE' ] = float(LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
+    hdu.header['PC01_01' ] = 1
+    hdu.header['PC02_01' ] = 0
+    hdu.header['PC03_01' ] = 0
+    hdu.header['PC04_01' ] = 0
+    hdu.header['PC01_02' ] = 0
+    hdu.header['PC02_02' ] = 1
+    hdu.header['PC03_02' ] = 0
+    hdu.header['PC04_02' ] = 0
+    hdu.header['PC01_03' ] = 0
+    hdu.header['PC02_03' ] = 0
+    hdu.header['PC03_03' ] = 1
+    hdu.header['PC04_03' ] = 0
+    hdu.header['PC01_04' ] = 0
+    hdu.header['PC02_04' ] = 0
+    hdu.header['PC03_04' ] = 0
+    hdu.header['PC04_04' ] = 1
+    hdu.header['CTYPE1'  ] = 'RA---SIN'
+    hdu.header['CRVAL1'  ] = 0 # Will be filled by imaging thread
+    hdu.header['CDELT1'  ] = -math.asin(1/float(config.res/2)) * (180/math.pi)
+    hdu.header['CRPIX1'  ] = config.res/2 + 1
+    hdu.header['CUNIT1'  ] = 'deg'
+    hdu.header['CTYPE2'  ] = 'DEC--SIN'
+    hdu.header['CRVAL2'  ] = float(LOFAR_CS002_LAT[0:-1])
+    hdu.header['CDELT2'  ] = math.asin(1/float(config.res/2)) * (180/math.pi)
+    hdu.header['CRPIX2'  ] = config.res/2 + 1
+    hdu.header['CUNIT2'  ] = 'deg'
+    hdu.header['CTYPE3'  ] = 'FREQ'
+    hdu.header['CRVAL3'  ] = freq_hz
+    hdu.header['CDELT3'  ] = bw_hz
+    hdu.header['CRPIX3'  ] = 1
+    hdu.header['CUNIT3'  ] = 'Hz'
+    hdu.header['CTYPE4'  ] = 'STOKES'
+    hdu.header['CRVAL4'  ] = 1
+    hdu.header['CDELT4'  ] = 1
+    hdu.header['CRPIX4'  ] = 1
+    hdu.header['CUNIT4'  ] = 'stokes-unit'
+    hdu.header['PV2_1'   ] = 0
+    hdu.header['PV2_2'   ] = 0
+    hdu.header['RESTFRQ' ] = freq_hz
+    hdu.header['RESTBW'  ] = bw_hz
+    hdu.header['SPECSYS' ] = 'LSRK'
+    hdu.header['ALTRVAL' ] = 0
+    hdu.header['ALTRPIX' ] = 1
+    hdu.header['VELREF'  ] = 257
+    hdu.header['TELESCOP'] = 'LOFAR'
+    hdu.header['INSTRUME'] = 'AARTFAAC'
     hdu.header['OBSERVER'] = 'AARTFAAC Project'
     hdu.header['DATE-OBS'] = ''
     hdu.header['TIMESYS' ] = 'UTC'
@@ -187,7 +203,7 @@ def create_empty_fits():
     hdu.header['OBSGEO-Y'] = 4.6102e+05
     hdu.header['OBSGEO-Z'] = 5.0649e+06
     hdu.header['DATE'    ] = '' # Will be filled by imaging thread
-    hdu.header['ORIGIN'  ] =  'pysquasher.py'
+    hdu.header['ORIGIN'  ] = 'Anton Pannekoek Institute'
     hdu.data = np.zeros( (1, 1, config.res, config.res) )
 
     return hdu
