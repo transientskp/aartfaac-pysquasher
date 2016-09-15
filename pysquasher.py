@@ -11,14 +11,9 @@ import logging
 import gfft
 import errno
 import math
+import rms
 from astropy.io import fits
-from astropy.time import Time
-
-# Use Agg backed which does not require an X display
-import matplotlib
-matplotlib.use('Agg')
-from matplotlib import pyplot as plt
-
+from astropy.time import Time, TimeDelta
 
 # Python logging format in similar style to googles c++ glog format
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
@@ -37,7 +32,7 @@ def get_configuration():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('files', metavar='FILE', type=argparse.FileType('r'), nargs='+',
-            help="Files containing calibrated visibilities")
+            help="Files containing calibrated visibilities, supports glob patterns")
     parser.add_argument('--res', type=int, default=1024,
             help="Image output resolution (default: %(default)s)")
     parser.add_argument('--window', type=int, default=6,
@@ -52,9 +47,6 @@ def get_configuration():
             help="Number of threads to use for imaging (default: %(default)s)")
     parser.add_argument('--output', type=str, default=os.getcwd(),
             help="Output directory (default: %(default)s)")
-    types = ['png', 'fits', 'both']
-    parser.add_argument('--type', type=str, choices=types, default=types[1],
-            help="Type of output file required (default: %(default)s)")
 
     return parser.parse_args()
 
@@ -81,8 +73,9 @@ def parse_header(hdr):
     };
     """
     m, t0, t1, s, d, p, c = struct.unpack("<Qddiiii", hdr[0:40])
+    f = np.frombuffer(hdr[80:152], dtype=np.uint64)
     assert(m == HDR_MAGIC)
-    return (m, t0, t1, s, d, p, c)
+    return (m, t0, t1, s, d, p, c, f)
 
 
 def parse_data(data):
@@ -90,23 +83,6 @@ def parse_data(data):
     Parse aartfaac ACM
     """
     return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
-
-
-def image_both(metadata):
-    """
-    Create and write both png and fits images
-    """
-    img = create_img(metadata)
-    write_png(img, metadata)
-    write_fits(img, metadata, fitshdu)
-
-
-def image_png(metadata):
-    """
-    Create and write png image
-    """
-    img = create_img(metadata)
-    write_png(img, metadata)
 
 
 def image_fits(metadata):
@@ -117,95 +93,107 @@ def image_fits(metadata):
     write_fits(img, metadata, fitshdu)
 
 
-def write_png(img, metadata):
-    imgtime = Time(metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
-
-    filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.png' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
-    plt.clf()
-    plt.imshow(img, interpolation='bilinear', cmap=plt.get_cmap('jet'), extent=[L[0], L[-1], M[0], M[-1]])
-    plt.title('F %0.2fMHz - BW %0.2fMHz - Tint %0.2fsec, T %s' % (freq_hz/1e6, bw_hz/1e6, config.inttime, imgtime.datetime.strftime("%Y-%m-%d %H:%M:%S UTC")), fontsize=9)
-    plt.colorbar()
-    plt.savefig(os.path.join(config.output, filename))
-    logger.info(filename)
-
-
 def write_fits(img, metadata, fitsobj):
     imgtime = Time(metadata[0][0] + config.inttime*0.5, scale='utc', format='unix', location=(LOFAR_CS002_LONG, LOFAR_CS002_LAT))
 
-    imgtime.format='fits'
+    imgtime.format='isot'
     imgtime.out_subfmt = 'date_hms'
     filename = '%s_S%0.1f_I%ix%i_W%i_A%0.1f.fits' % (imgtime.datetime.strftime("%Y%m%d%H%M%SUTC"), np.mean(subbands), len(subbands), config.inttime, config.window, config.alpha)
+    filename = os.path.join(config.output, filename)
+
+    if os.path.exists(filename):
+        logger.info("'%s' exists - skipping", filename)
+        return
 
     # CRVAL1 should hold RA in degrees. sidereal_time returns hour angle in
     # hours.
     fitsobj.header['CRVAL1'] = imgtime.sidereal_time(kind='apparent').value  *  15
     fitsobj.header['DATE-OBS'] = str(imgtime)
+    imgtime_end = imgtime + TimeDelta(config.inttime, format='sec')
+    fitsobj.header['END_UTC'] = str(imgtime_end)
     t = Time.now();
-    t.format = 'fits'
+    t.format = 'isot'
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
     fitsobj.writeto(filename)
-    logger.info(filename)
+    data = img[np.logical_not(np.isnan(img))]
+    quality = rms.rms(rms.clip(data))
+    high = data.max()
+    low = data.min()
+    fitsobj.header['DATAMAX'] = high
+    fitsobj.header['DATAMIN'] = low
+    fitsobj.header['HISTORY'] = 'AARTFAAC 6 stations superterp'
+    fitsobj.header['HISTORY'] = 'RMS {}'.format(quality)
+    fitsobj.header['HISTORY'] = 'DYNAMIC RANGE {}:{}'.format(int(round(high)), int(round(quality)))
+    logger.info("%s %0.3f %i:%i", filename, quality, int(round(high)), int(round(quality)))
 
 
 def create_empty_fits():
+    """
+    See http://heasarc.gsfc.nasa.gov/docs/fcg/standard_dict.html for details
+    """
     hdu = fits.PrimaryHDU()
-    hdu.header['BSCALE' ] =  1
-    hdu.header['BZERO'  ] =  0
-    hdu.header['BMAJ'   ] =  1
-    hdu.header['BMIN'   ] =  1
-    hdu.header['BPA'    ] =  0
-    hdu.header['BTYPE'  ] = 'Intensity'
-    hdu.header['OBJECT' ] = 'Aartfaac image'
-    hdu.header['BUNIT'  ] = 'Jy/beam'
-    hdu.header['EQUINOX'] = 2000
-    hdu.header['RADESYS'] = 'FK5'
-    hdu.header['LONPOLE'] = 180
-    hdu.header['LATPOLE'] = float(LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
-    hdu.header['PC01_01'] = 1
-    hdu.header['PC02_01'] = 0
-    hdu.header['PC03_01'] = 0
-    hdu.header['PC04_01'] = 0
-    hdu.header['PC01_02'] = 0
-    hdu.header['PC02_02'] = 1
-    hdu.header['PC03_02'] = 0
-    hdu.header['PC04_02'] = 0
-    hdu.header['PC01_03'] = 0
-    hdu.header['PC02_03'] = 0
-    hdu.header['PC03_03'] = 1
-    hdu.header['PC04_03'] = 0
-    hdu.header['PC01_04'] = 0
-    hdu.header['PC02_04'] = 0
-    hdu.header['PC03_04'] = 0
-    hdu.header['PC04_04'] = 1
-    hdu.header['CTYPE1' ] = 'RA---SIN'
-    hdu.header['CRVAL1' ] = 0 # Will be filled by imaging thread
-    hdu.header['CDELT1' ] = -math.asin(1/float(config.res/2)) * (180/math.pi)
-    hdu.header['CRPIX1' ] = config.res/2 + 1
-    hdu.header['CUNIT1' ] = 'deg'
-    hdu.header['CTYPE2' ] = 'DEC--SIN'
-    hdu.header['CRVAL2' ] = float(LOFAR_CS002_LAT[0:-1])
-    hdu.header['CDELT2' ] = math.asin(1/float(config.res/2)) * (180/math.pi)
-    hdu.header['CRPIX2' ] = config.res/2 + 1
-    hdu.header['CUNIT2' ] = 'deg'
-    hdu.header['CTYPE3' ] = 'FREQ'
-    hdu.header['CRVAL3' ] = freq_hz
-    hdu.header['CDELT3' ] = bw_hz
-    hdu.header['CRPIX3' ] = 1
-    hdu.header['CUNIT3' ] = 'Hz'
-    hdu.header['CTYPE4' ] = 'STOKES'
-    hdu.header['CRVAL4' ] = 1
-    hdu.header['CDELT4' ] = 1
-    hdu.header['CRPIX4' ] = 1
-    hdu.header['CUNIT4' ] = 'stokes-unit'
-    hdu.header['PV2_1'  ] = 0
-    hdu.header['PV2_2'  ] = 0
-    hdu.header['RESTFRQ'] = freq_hz
-    hdu.header['SPECSYS'] = 'LSRK'
-    hdu.header['ALTRVAL'] = 0
-    hdu.header['ALTRPIX'] = 1
-    hdu.header['VELREF' ] = 257
-    hdu.header['TELESCOP'] = 'AARTFAAC'
+    hdu.header['SIMPLE'  ] = 'F'
+    hdu.header['AUTHOR'  ] = 'pysquasher.py - https://github.com/transientskp/aartfaac-pysquasher'
+    hdu.header['REFERENC'] = 'http://aartfaac.org/'
+    hdu.header['BSCALE'  ] =  1
+    hdu.header['BZERO'   ] =  0
+    hdu.header['BMAJ'    ] =  1
+    hdu.header['BMIN'    ] =  1
+    hdu.header['BPA'     ] =  0
+    hdu.header['BTYPE'   ] = 'Intensity'
+    hdu.header['OBJECT'  ] = 'Aartfaac image'
+    hdu.header['BUNIT'   ] = 'Jy/beam'
+    hdu.header['EQUINOX' ] = 2000
+    hdu.header['RADESYS' ] = 'FK5'
+    hdu.header['LONPOLE' ] = 180
+    hdu.header['LATPOLE' ] = float(LOFAR_CS002_LAT[0:-1]) # Latitude of LOFAR
+    hdu.header['PC01_01' ] = 1
+    hdu.header['PC02_01' ] = 0
+    hdu.header['PC03_01' ] = 0
+    hdu.header['PC04_01' ] = 0
+    hdu.header['PC01_02' ] = 0
+    hdu.header['PC02_02' ] = 1
+    hdu.header['PC03_02' ] = 0
+    hdu.header['PC04_02' ] = 0
+    hdu.header['PC01_03' ] = 0
+    hdu.header['PC02_03' ] = 0
+    hdu.header['PC03_03' ] = 1
+    hdu.header['PC04_03' ] = 0
+    hdu.header['PC01_04' ] = 0
+    hdu.header['PC02_04' ] = 0
+    hdu.header['PC03_04' ] = 0
+    hdu.header['PC04_04' ] = 1
+    hdu.header['CTYPE1'  ] = 'RA---SIN'
+    hdu.header['CRVAL1'  ] = 0 # Will be filled by imaging thread
+    hdu.header['CDELT1'  ] = -math.asin(1/float(config.res/2)) * (180/math.pi)
+    hdu.header['CRPIX1'  ] = config.res/2 + 1
+    hdu.header['CUNIT1'  ] = 'deg'
+    hdu.header['CTYPE2'  ] = 'DEC--SIN'
+    hdu.header['CRVAL2'  ] = float(LOFAR_CS002_LAT[0:-1])
+    hdu.header['CDELT2'  ] = math.asin(1/float(config.res/2)) * (180/math.pi)
+    hdu.header['CRPIX2'  ] = config.res/2 + 1
+    hdu.header['CUNIT2'  ] = 'deg'
+    hdu.header['CTYPE3'  ] = 'FREQ'
+    hdu.header['CRVAL3'  ] = freq_hz
+    hdu.header['CDELT3'  ] = bw_hz
+    hdu.header['CRPIX3'  ] = 1
+    hdu.header['CUNIT3'  ] = 'Hz'
+    hdu.header['CTYPE4'  ] = 'STOKES'
+    hdu.header['CRVAL4'  ] = 1
+    hdu.header['CDELT4'  ] = 1
+    hdu.header['CRPIX4'  ] = 1
+    hdu.header['CUNIT4'  ] = 'stokes-unit'
+    hdu.header['PV2_1'   ] = 0
+    hdu.header['PV2_2'   ] = 0
+    hdu.header['RESTFRQ' ] = freq_hz
+    hdu.header['RESTBW'  ] = bw_hz
+    hdu.header['SPECSYS' ] = 'LSRK'
+    hdu.header['ALTRVAL' ] = 0
+    hdu.header['ALTRPIX' ] = 1
+    hdu.header['VELREF'  ] = 257
+    hdu.header['TELESCOP'] = 'LOFAR'
+    hdu.header['INSTRUME'] = 'AARTFAAC'
     hdu.header['OBSERVER'] = 'AARTFAAC Project'
     hdu.header['DATE-OBS'] = ''
     hdu.header['TIMESYS' ] = 'UTC'
@@ -215,7 +203,7 @@ def create_empty_fits():
     hdu.header['OBSGEO-Y'] = 4.6102e+05
     hdu.header['OBSGEO-Z'] = 5.0649e+06
     hdu.header['DATE'    ] = '' # Will be filled by imaging thread
-    hdu.header['ORIGIN'  ] =  'pysquasher.py'
+    hdu.header['ORIGIN'  ] =  'Anton Pannekoek Institute, pysquasher.py'
     hdu.data = np.zeros( (1, 1, config.res, config.res) , dtype=np.float32)
 
     return hdu
@@ -286,18 +274,21 @@ if __name__ == "__main__":
     subbands = []
 
     for f in config.files:
-        _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_first = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
         size = os.path.getsize(f.name)
         n = size/(LEN_BDY+LEN_HDR)
         f.seek((n-1)*(LEN_BDY+LEN_HDR))
-        _, t0, _, s, _, _, _ = parse_header(f.read(LEN_HDR))
+        _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_last = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
-        logger.info('parsing \'%s\' (%i bytes)', os.path.basename(f.name), size)
-        logger.info('  %s start time', datetime.datetime.strftime(utc_first, '%Y-%d-%m %H:%M:%S %Z'))
-        logger.info('  %s end time', datetime.datetime.strftime(utc_last, '%Y-%d-%m %H:%M:%S %Z'))
+        logger.info('parsing \'%s\' (%i bytes) %s - %s',
+                    os.path.basename(f.name), size,
+                    datetime.datetime.strftime(utc_first, '%Y-%d-%m %H:%M:%S %Z'),
+                    datetime.datetime.strftime(utc_last, '%Y-%d-%m %H:%M:%S %Z'))
         subbands.append(s)
         f.seek(0)
+
+    subbands.sort()
 
     dx = 1.0 / config.res
     in_ax = load(config.antpos, subbands)
@@ -318,8 +309,14 @@ if __name__ == "__main__":
         N = size/(LEN_BDY+LEN_HDR)
 
         for i in range(N):
-            m, t0, t1, s, d, p, c = parse_header(f.read(LEN_HDR))
-            metadata.append((t0, s, p, f.name, f.tell()))
+            m, t0, t1, s, d, p, c, fl = parse_header(f.read(LEN_HDR))
+            flagged = []
+            for j,v in enumerate(fl):
+                for k in range(64):
+                    if np.bitwise_and(v, np.uint64(1<<k)):
+                        flagged.append(j*64+k)
+
+            metadata.append((t0, s, p, f.name, f.tell(), flagged))
             f.seek(f.tell()+LEN_BDY)
 
         f.close()
@@ -348,11 +345,6 @@ if __name__ == "__main__":
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN
     fitshdu = create_empty_fits()
 
-    logging.info('Imaging %i images to \'%s\' using %i threads', len(valid), config.type, config.nthreads)
+    logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
     pool = multiprocessing.Pool(config.nthreads)
-    if config.type  == 'png':
-        pool.map(image_png, valid)
-    elif config.type == 'fits':
-        pool.map(image_fits, valid)
-    else:
-        pool.map(image_both, valid)
+    pool.map(image_fits, valid)
