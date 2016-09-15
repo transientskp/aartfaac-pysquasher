@@ -216,7 +216,7 @@ def create_empty_fits():
     hdu.header['OBSGEO-Z'] = 5.0649e+06
     hdu.header['DATE'    ] = '' # Will be filled by imaging thread
     hdu.header['ORIGIN'  ] =  'pysquasher.py'
-    hdu.data = np.zeros( (1, 1, config.res, config.res) )
+    hdu.data = np.zeros( (1, 1, config.res, config.res) , dtype=np.float32)
 
     return hdu
 
