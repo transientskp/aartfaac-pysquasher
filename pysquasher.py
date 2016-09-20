@@ -122,9 +122,9 @@ def write_fits(img, metadata, fitsobj):
     low = data.min()
     fitsobj.header['DATAMAX'] = high
     fitsobj.header['DATAMIN'] = low
-    fitsobj.header['HISTORY'] = 'AARTFAAC 6 stations superterp'
-    fitsobj.header['HISTORY'] = 'RMS {}'.format(quality)
-    fitsobj.header['HISTORY'] = 'DYNAMIC RANGE {}:{}'.format(int(round(high)), int(round(quality)))
+    #fitsobj.header['HISTORY'] = 'AARTFAAC 6 stations superterp'
+    #fitsobj.header['HISTORY'] = 'RMS {}'.format(quality)
+    #fitsobj.header['HISTORY'] = 'DYNAMIC RANGE {}:{}'.format(int(round(high)), int(round(quality)))
     logger.info("%s %0.3f %i:%i", filename, quality, int(round(high)), int(round(quality)))
 
 
