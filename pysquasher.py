@@ -115,16 +115,16 @@ def write_fits(img, metadata, fitsobj):
     t.format = 'isot'
     fitsobj.header['DATE'] = str(t)
     fitsobj.data[0, 0, :, :] = img
-    fitsobj.writeto(filename)
     data = img[np.logical_not(np.isnan(img))]
     quality = rms.rms(rms.clip(data))
     high = data.max()
     low = data.min()
     fitsobj.header['DATAMAX'] = high
     fitsobj.header['DATAMIN'] = low
-    #fitsobj.header['HISTORY'] = 'AARTFAAC 6 stations superterp'
-    #fitsobj.header['HISTORY'] = 'RMS {}'.format(quality)
-    #fitsobj.header['HISTORY'] = 'DYNAMIC RANGE {}:{}'.format(int(round(high)), int(round(quality)))
+    fitsobj.header['HISTORY'][0] = 'AARTFAAC 6 stations superterp'
+    fitsobj.header['HISTORY'][1] = 'RMS {}'.format(quality)
+    fitsobj.header['HISTORY'][2] = 'DYNAMIC RANGE {}:{}'.format(int(round(high)), int(round(quality)))
+    fitsobj.writeto(filename)
     logger.info("%s %0.3f %i:%i", filename, quality, int(round(high)), int(round(quality)))
 
 
@@ -133,7 +133,6 @@ def create_empty_fits():
     See http://heasarc.gsfc.nasa.gov/docs/fcg/standard_dict.html for details
     """
     hdu = fits.PrimaryHDU()
-    hdu.header['SIMPLE'  ] = 'F'
     hdu.header['AUTHOR'  ] = 'pysquasher.py - https://github.com/transientskp/aartfaac-pysquasher'
     hdu.header['REFERENC'] = 'http://aartfaac.org/'
     hdu.header['BSCALE'  ] =  1
@@ -203,7 +202,10 @@ def create_empty_fits():
     hdu.header['OBSGEO-Y'] = 4.6102e+05
     hdu.header['OBSGEO-Z'] = 5.0649e+06
     hdu.header['DATE'    ] = '' # Will be filled by imaging thread
-    hdu.header['ORIGIN'  ] =  'Anton Pannekoek Institute, pysquasher.py'
+    hdu.header['ORIGIN'  ] = 'Anton Pannekoek Institute'
+    hdu.header['HISTORY' ] = '_'
+    hdu.header['HISTORY' ] = '_'
+    hdu.header['HISTORY' ] = '_'
     hdu.data = np.zeros( (1, 1, config.res, config.res) , dtype=np.float32)
 
     return hdu
