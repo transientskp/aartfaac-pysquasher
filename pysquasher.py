@@ -18,7 +18,7 @@ from astropy.time import Time, TimeDelta
 # Python logging format in similar style to googles c++ glog format
 LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(message)s"
 
-VERSION = '1.0'
+VERSION = '1.1'
 NUM_ANT = 288
 LEN_HDR = 512
 LEN_BDY = NUM_ANT**2 * 8
@@ -290,6 +290,7 @@ if __name__ == "__main__":
         subbands.append(s)
         f.seek(0)
 
+    subbands = list(set(subbands))
     subbands.sort()
 
     dx = 1.0 / config.res

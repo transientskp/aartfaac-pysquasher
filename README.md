@@ -7,5 +7,4 @@ The following packages are required:
 
   - numpy
   - [gfft](https://github.com/mrbell/gfft)
-  - [pyfits](https://pythonhosted.org/pyfits)
   - astropy
