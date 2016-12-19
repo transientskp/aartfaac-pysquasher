@@ -298,7 +298,7 @@ if __name__ == "__main__":
     freq_hz = np.mean(subbands)*(2e8/1024)
     bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
 
-    logger.info('%i subbands', len(subbands))
+    logger.info('{} subbands: {}'.format(len(subbands), subbands))
     logger.info('%0.2f MHz central frequency', freq_hz*1e-6)
     logger.info('%0.2f MHz bandwidth', bw_hz*1e-6)
     logger.info('%i seconds integration time', config.inttime)
@@ -325,7 +325,7 @@ if __name__ == "__main__":
 
     metadata.sort()
     n = len(metadata)
-    m = (len(subbands)*config.inttime)*2
+    m = (len(subbands)*config.inttime)*2 # XX, YY pol
     skip = 0
     valid = []
     times = np.zeros((m, 1), dtype=np.uint32)
@@ -336,7 +336,7 @@ if __name__ == "__main__":
         for j in range(m):
             times[j] = np.uint32(metadata[i+j][0])
 
-        if (times[0] <= times+config.inttime).all():
+        if (times[m-1] - times[0]) == (config.inttime - 1):
             valid.append(metadata[i:i+m])
             skip = i + m
 
