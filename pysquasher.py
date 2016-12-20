@@ -225,7 +225,9 @@ def create_img (metadata):
         for v in metadata[i*config.inttime*2:(i+1)*config.inttime*2]:
             f = open(v[3], 'r')
             f.seek(v[4])
-            sb.append(parse_data(f.read(LEN_BDY)))
+            dat = parse_data(f.read(LEN_BDY))
+            dat[ (dat<-1) | (dat>1) ] = 0 # To filter out outlier visibilities
+            sb.append(dat)
         data.append(np.array(sb).mean(axis=0))
 
     return np.rot90 (np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha)), 3)
