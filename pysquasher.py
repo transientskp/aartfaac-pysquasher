@@ -12,6 +12,7 @@ import gfft
 import errno
 import math
 import rms
+import gc
 from astropy.io import fits
 from astropy.time import Time, TimeDelta
 
@@ -51,6 +52,17 @@ def get_configuration():
     return parser.parse_args()
 
 
+def align_to_magic(fp):
+    magic = 0 
+    stream = ['\x00'] * 8
+    while magic != HDR_MAGIC:
+        stream.append(fp.read(1))
+        stream.pop(0)
+        magic = struct.unpack('Q', ''.join(stream))[0]
+
+    return fp.tell() - 8
+
+
 def parse_header(hdr):
     """
     Parse aartfaac header for calibrated data
@@ -74,7 +86,6 @@ def parse_header(hdr):
     """
     m, t0, t1, s, d, p, c = struct.unpack("<Qddiiii", hdr[0:40])
     f = np.frombuffer(hdr[80:152], dtype=np.uint64)
-    assert(m == HDR_MAGIC)
     return (m, t0, t1, s, d, p, c, f)
 
 
@@ -264,8 +275,8 @@ if __name__ == "__main__":
     try:
         os.makedirs(config.output)
         logger.info('Created directory \'%s\'', config.output)
-    except OSError as exc:
-        if exc.errno == errno.EEXIST and os.path.isdir(config.output):
+    except OSError as e:
+        if e.errno == errno.EEXIST and os.path.isdir(config.output):
             pass
         else:
             raise
@@ -274,28 +285,34 @@ if __name__ == "__main__":
 
     metadata = []
     subbands = []
+    files = []
 
     total_size = 0
     for f in config.files:
-        try:
-            _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
-        except IOError as e:
-            logger.error("%s - (skipping)", str(e))
+        size = os.path.getsize(f.name)
+        start = align_to_magic(f)
+
+        if (start+LEN_BDY+LEN_HDR) > size:
+            logger.error("%s corrupted - skipping", f.name)
             continue
 
+        f.seek(start)
+        m, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
+
         utc_first = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
-        size = os.path.getsize(f.name)
-        total_size += size
         n = size/(LEN_BDY+LEN_HDR)
-        f.seek((n-1)*(LEN_BDY+LEN_HDR))
+        f.seek((n-1)*(LEN_BDY+LEN_HDR) + start)
+
         _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_last = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
-        logger.info('parsing \'%s\' (%i bytes) %s - %s',
-                    os.path.basename(f.name), size,
+        logger.info('parsing \'%s\' from %i (%i bytes) %s - %s',
+                    os.path.basename(f.name), start, size,
                     datetime.datetime.strftime(utc_first, '%Y-%d-%m %H:%M:%S %Z'),
                     datetime.datetime.strftime(utc_last, '%Y-%d-%m %H:%M:%S %Z'))
         subbands.append(s)
-        f.seek(0)
+        f.seek(start)
+        total_size += size
+        files.append(f)
 
     logger.info('%0.2f GiB to examine on disk' % (total_size/1024**3.))
     subbands = list(set(subbands))
@@ -307,7 +324,7 @@ if __name__ == "__main__":
     freq_hz = np.mean(subbands)*(2e8/1024)
     bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
 
-    logger.info('%i subbands: %s', len(subbands), ', '.join(subbands))
+    logger.info('%i subbands: %s', len(subbands), ', '.join(map(str, subbands)))
     logger.info('%0.2f MHz central frequency', freq_hz*1e-6)
     logger.info('%0.2f MHz bandwidth', bw_hz*1e-6)
     logger.info('%i seconds integration time', config.inttime)
@@ -316,13 +333,15 @@ if __name__ == "__main__":
     logger.info('%0.1f Kaiser alpha parameter', config.alpha)
 
     current_size = 0
-    for f in config.files:
+    for f in files:
         size = os.path.getsize(f.name)
         current_size += size
         N = size/(LEN_BDY+LEN_HDR)
         logger.info("%i ACMs in '%s' (%i%%)", N, f.name, round(current_size/float(total_size) * 100))
 
         for i in range(N):
+            start = align_to_magic(f)
+            f.seek(start)
             m, t0, t1, s, d, p, c, fl = parse_header(f.read(LEN_HDR))
             flagged = []
             for j,v in enumerate(fl):
@@ -359,6 +378,14 @@ if __name__ == "__main__":
     xv, yv = np.meshgrid(L, M)
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN
     fitshdu = create_empty_fits()
+
+    # clean up everything we don't need before we start forking
+    del metadata[:]
+    del L
+    del M
+    del xv
+    del yv
+    gc.collect()
 
     logging.info('Imaging %i images using %i threads (%0.2f GiB)', len(valid), config.nthreads, len(valid)*(LEN_HDR+LEN_BDY)/1024**3.)
     pool = multiprocessing.Pool(config.nthreads)
