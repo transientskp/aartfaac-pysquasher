@@ -277,7 +277,12 @@ if __name__ == "__main__":
 
     total_size = 0
     for f in config.files:
-        _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
+        try:
+            _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
+        except IOError as e:
+            logger.error("%s - (skipping)", str(e))
+            continue
+
         utc_first = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
         size = os.path.getsize(f.name)
         total_size += size
