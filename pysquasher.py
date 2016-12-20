@@ -299,7 +299,7 @@ if __name__ == "__main__":
     freq_hz = np.mean(subbands)*(2e8/1024)
     bw_hz = (np.max(subbands) - np.min(subbands) + 1)*(2e8/1024)
 
-    logger.info('{} subbands: {}'.format(len(subbands), subbands))
+    logger.info('%i subbands: %s', len(subbands), ', '.join(subbands))
     logger.info('%0.2f MHz central frequency', freq_hz*1e-6)
     logger.info('%0.2f MHz bandwidth', bw_hz*1e-6)
     logger.info('%i seconds integration time', config.inttime)
@@ -307,9 +307,12 @@ if __name__ == "__main__":
     logger.info('%i Kaiser window size', config.window)
     logger.info('%0.1f Kaiser alpha parameter', config.alpha)
 
+    total_size = 0
     for f in config.files:
         size = os.path.getsize(f.name)
+        total_size += size
         N = size/(LEN_BDY+LEN_HDR)
+        logger.info("%i ACMs in '%s'", N, f.name)
 
         for i in range(N):
             m, t0, t1, s, d, p, c, fl = parse_header(f.read(LEN_HDR))
@@ -323,6 +326,8 @@ if __name__ == "__main__":
             f.seek(f.tell()+LEN_BDY)
 
         f.close()
+    total_size /= 1024**3.
+    logger.info('%0.2fG to examine on disk' % (total_size))
 
     metadata.sort()
     n = len(metadata)
@@ -348,6 +353,6 @@ if __name__ == "__main__":
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN
     fitshdu = create_empty_fits()
 
-    logging.info('Imaging %i images using %i threads', len(valid), config.nthreads)
+    logging.info('Imaging %i images using %i threads (%0.2fG)', len(valid), config.nthreads, len(valid)*(LEN_HDR+LEN_BDY)/1024**3.)
     pool = multiprocessing.Pool(config.nthreads)
     pool.map(image_fits, valid)
