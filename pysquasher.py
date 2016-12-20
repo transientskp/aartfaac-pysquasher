@@ -275,10 +275,12 @@ if __name__ == "__main__":
     metadata = []
     subbands = []
 
+    total_size = 0
     for f in config.files:
         _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
         utc_first = datetime.datetime.utcfromtimestamp(t0).replace(tzinfo=pytz.utc)
         size = os.path.getsize(f.name)
+        total_size += size
         n = size/(LEN_BDY+LEN_HDR)
         f.seek((n-1)*(LEN_BDY+LEN_HDR))
         _, t0, _, s, _, _, _, _ = parse_header(f.read(LEN_HDR))
@@ -290,6 +292,7 @@ if __name__ == "__main__":
         subbands.append(s)
         f.seek(0)
 
+    logger.info('%0.2f GiB to examine on disk' % (total_size/1024**3.))
     subbands = list(set(subbands))
     subbands.sort()
 
@@ -307,12 +310,12 @@ if __name__ == "__main__":
     logger.info('%i Kaiser window size', config.window)
     logger.info('%0.1f Kaiser alpha parameter', config.alpha)
 
-    total_size = 0
+    current_size = 0
     for f in config.files:
         size = os.path.getsize(f.name)
-        total_size += size
+        current_size += size
         N = size/(LEN_BDY+LEN_HDR)
-        logger.info("%i ACMs in '%s'", N, f.name)
+        logger.info("%i ACMs in '%s' (%i%%)", N, f.name, round(current_size/float(total_size) * 100))
 
         for i in range(N):
             m, t0, t1, s, d, p, c, fl = parse_header(f.read(LEN_HDR))
@@ -326,9 +329,8 @@ if __name__ == "__main__":
             f.seek(f.tell()+LEN_BDY)
 
         f.close()
-    total_size /= 1024**3.
-    logger.info('%0.2fG to examine on disk' % (total_size))
 
+    logger.info('%i ACMs to be sorted', len(metadata))
     metadata.sort()
     n = len(metadata)
     m = (len(subbands)*config.inttime)*2 # XX, YY pol
@@ -353,6 +355,6 @@ if __name__ == "__main__":
     mask[np.sqrt(np.array(xv**2 + yv**2)) > 1] = np.NaN
     fitshdu = create_empty_fits()
 
-    logging.info('Imaging %i images using %i threads (%0.2fG)', len(valid), config.nthreads, len(valid)*(LEN_HDR+LEN_BDY)/1024**3.)
+    logging.info('Imaging %i images using %i threads (%0.2f GiB)', len(valid), config.nthreads, len(valid)*(LEN_HDR+LEN_BDY)/1024**3.)
     pool = multiprocessing.Pool(config.nthreads)
     pool.map(image_fits, valid)
