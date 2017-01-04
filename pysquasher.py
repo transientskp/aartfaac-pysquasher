@@ -240,7 +240,7 @@ def create_img(metadata):
             sb.append(dat)
         data.append(np.array(sb).mean(axis=0))
 
-    return np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, enforce_hermitian_symmetry=True, verbose=False, W=config.window, alpha=config.alpha)), 3)*mask
+    return np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, enforce_hermitian_symmetry=True, verbose=False, W=config.window, alpha=config.alpha)), 1)*mask
 
 
 
