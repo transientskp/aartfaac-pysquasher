@@ -21,8 +21,9 @@ LOG_FORMAT = "%(levelname)s %(asctime)s %(process)d %(filename)s:%(lineno)d] %(m
 
 VERSION = '1.1'
 NUM_ANT = 288
+NUM_BSL = (NUM_ANT*NUM_ANT+NUM_ANT) / 2
 LEN_HDR = 512
-LEN_BDY = NUM_ANT**2 * 8
+LEN_BDY = NUM_BSL * 8
 HDR_MAGIC = 0x4141525446414143
 LOFAR_CS002_LONG = '6.869837540d'
 LOFAR_CS002_LAT  = '52.915122495d'
@@ -93,7 +94,7 @@ def parse_data(data):
     """
     Parse aartfaac ACM
     """
-    return np.fromstring(data, dtype=np.complex64).reshape(NUM_ANT, NUM_ANT)
+    return np.fromstring(data, dtype=np.complex64)
 
 
 def image_fits(metadata):
@@ -239,7 +240,7 @@ def create_img(metadata):
             sb.append(dat)
         data.append(np.array(sb).mean(axis=0))
 
-    return np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, verbose=False, W=config.window, alpha=config.alpha)), 3)*mask
+    return np.rot90(np.real(gfft.gfft(np.ravel(data), in_ax, out_ax, enforce_hermitian_symmetry=True, verbose=False, W=config.window, alpha=config.alpha)), 3)*mask
 
 
 
@@ -256,7 +257,7 @@ def load(filename, subbands):
     u, v = [], []
 
     for a1 in range(0, NUM_ANT):
-        for a2 in range(0, NUM_ANT):
+        for a2 in range(0, a1+1):
             u.append(L[a1, 0] - L[a2, 0])
             v.append(L[a1, 1] - L[a2, 1])
 
