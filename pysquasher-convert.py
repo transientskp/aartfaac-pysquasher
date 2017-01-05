@@ -42,6 +42,12 @@ if __name__ == "__main__":
         logging.info('Created dir {}'.format(cfg.output))
 
     for f in cfg.files:
+        size = os.path.getsize(f.name)
+
+        if size < LEN_TOT:
+            logging.error('File too small {}, ignoring'.format(f.name))
+            continue
+
         start = align_to_magic(f)
         f.seek(LEN_HDR)
         
@@ -52,7 +58,7 @@ if __name__ == "__main__":
         filename = os.path.join(cfg.output, os.path.basename(f.name))
         logging.info('{} -> {}'.format(os.path.basename(f.name), filename))
         f.seek(start)
-        size = os.path.getsize(f.name)
+        size -= start
         n = size/(LEN_TOT)
 
         with open(filename, 'wb') as nf:
