@@ -4,7 +4,7 @@ setup(
   name = "pysquasher",
   version="1.0",
   packages=[],
-  scripts=["pysquasher.py", "rms.py"],
+  scripts=["pysquasher.py", "rms.py", "pysquasher-convert.py"],
   description="Squash calibrated images",
   url="https://github.com/transientskp/aartfaac-pysquasher",
   author="Folkert Huizinga",
