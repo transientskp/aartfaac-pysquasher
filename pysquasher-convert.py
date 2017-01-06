@@ -22,6 +22,8 @@ def get_configuration():
             help="Files containing calibrated visibilities, supports glob patterns")
     parser.add_argument('--output', type=str, default=os.getcwd(),
             help="Output directory (default: %(default)s)")
+    parser.add_argument('--no-keep', dest='keep', action='store_false',
+            help="Remove the old files")
 
     return parser.parse_args()
 
@@ -56,7 +58,6 @@ if __name__ == "__main__":
             continue
 
         filename = os.path.join(cfg.output, os.path.basename(f.name))
-        logging.info('{} -> {}'.format(os.path.basename(f.name), filename))
         f.seek(start)
         size -= start
         n = size/(LEN_TOT)
@@ -70,3 +71,9 @@ if __name__ == "__main__":
                 upp = np.take(acm, indices)
                 nf.write(data[:LEN_HDR])
                 nf.write(upp.tostring())
+
+        if not cfg.keep:
+            logging.info('{} (D) -> {}'.format(f.name, filename))
+            os.remove(f.name)
+        else:
+            logging.info('{} -> {}'.format(f.name, filename))
