@@ -75,5 +75,6 @@ if __name__ == "__main__":
         if not cfg.keep:
             logging.info('{} (D) -> {}'.format(f.name, filename))
             os.remove(f.name)
+            os.rename(filename, f.name)
         else:
             logging.info('{} -> {}'.format(f.name, filename))
